@@ -22,22 +22,23 @@ NS.Loot = Loot
 
 local GOLD = { 1, 0.82, 0 }
 local GREEN = { 0.25, 1, 0.25 }
--- The Loot tab has six Prio columns. One ordered scale, green (#1) through yellow and orange to red (#6),
--- so the rank reads at a glance without having to remember what a colour means.
+-- The Loot tab has six Prio columns. Ranks use the item-quality scale every player already reads as an order:
+-- legendary orange (#1), epic purple, rare blue, uncommon green, common white, poor grey (#6). Six distinct hues.
 local PRIO_SLOTS = 6
 local PRIO_COLOURS = {
-  [1] = { 0.30, 1.00, 0.30 },  -- green
-  [2] = { 0.65, 1.00, 0.30 },  -- lime
-  [3] = { 1.00, 0.90, 0.20 },  -- yellow
-  [4] = { 1.00, 0.65, 0.20 },  -- orange
-  [5] = { 1.00, 0.45, 0.20 },  -- orange-red
-  [6] = { 1.00, 0.30, 0.30 },  -- red
+  [1] = { 1.00, 0.50, 0.00 },  -- legendary orange
+  [2] = { 0.64, 0.21, 0.93 },  -- epic purple
+  [3] = { 0.00, 0.44, 0.87 },  -- rare blue
+  [4] = { 0.12, 1.00, 0.00 },  -- uncommon green
+  [5] = { 1.00, 1.00, 1.00 },  -- common white
+  [6] = { 0.62, 0.62, 0.62 },  -- poor grey
 }
 local function prioColour(rank) return PRIO_COLOURS[rank] or PRIO_COLOURS[6] end
 local function prioText(st) return "#" .. st.prio .. "/" .. math.max(PRIO_SLOTS, st.prioOf or 0) end
 local WHITE = { 1, 1, 1 }
-local GREY = { 0.55, 0.55, 0.55 }
-local DIM = { 0.4, 0.4, 0.4 }
+local WANTS = { 0.45, 0.9, 1 }   -- light cyan: on their wishlist (distinct from every rank colour)
+local GREY = { 0.42, 0.42, 0.42 } -- already has it (darker than poor-quality grey)
+local DIM = { 0.3, 0.3, 0.3 }
 
 local index -- nil = not built, false = no data, table = built
 local resolveCache = {}
@@ -169,7 +170,7 @@ function Loot.CellText(st)
   if not st.char then return "?", unpack(DIM) end
   if st.prio then return prioText(st), unpack(prioColour(st.prio)) end
   if st.has then return "has", unpack(GREY) end
-  if st.need then return "Wants", unpack(WHITE) end
+  if st.need then return "Wants", unpack(WANTS) end
   return "\226\128\148", unpack(DIM) -- em dash: not on their list
 end
 
@@ -213,7 +214,7 @@ function Loot.TooltipLines(st, name)
     add(" ", WHITE)
     if st.prio then add("Officer Prio pick " .. prioText(st), prioColour(st.prio)) end
     if st.has then add("Already has it  (Loot Log " .. tostring(st.has) .. ")", GREY)
-    elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), WHITE)
+    elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), WANTS)
     elseif not st.prio then add("Not on their list", GREY) end
     if c.of and c.of > 0 then add("BiS progress " .. (c.bis or 0) .. " / " .. c.of, GREY) end
   end
