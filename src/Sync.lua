@@ -145,6 +145,7 @@ end
 
 local function channels()
   local t = {}
+  if NS.ForThisGuild and not NS.ForThisGuild() then return t end -- an alt in another guild: say nothing there
   if IsInGuild() then t[#t + 1] = "GUILD" end
   if inHomeRaid() then t[#t + 1] = "RAID" end
   return t
@@ -407,6 +408,7 @@ local requestPrio -- defined below
 
 local function onComm(_, msg, channel, sender)
   if type(msg) ~= "string" then return end
+  if NS.ForThisGuild and not NS.ForThisGuild() then return end -- another guild's chat: not ours to answer
   wire("in", "", msg, channel, sender)
   if msg:sub(1, 1) ~= PROTO then dbg("dropped: protocol %s, ours is %s", msg:sub(1, 1), PROTO) return end
   if isMe(sender) then return end

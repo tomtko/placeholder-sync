@@ -104,6 +104,26 @@ function NS.RecordCharacter()
   db.characters[guid] = rec
 end
 
+-- Which guild ---------------------------------------------------------------------------------------
+-- The loot dataset carries the guild the server serves (the bridge folds it in from the server, and the in-game
+-- sync hands it to every addon user). A character in any other guild, an officer's alt elsewhere or a test guild,
+-- records nothing and shares nothing, so another guild's bank or awards never reach our server or sheet.
+
+local function normGuild(s) return (tostring(s or ""):lower():gsub("[%s'’%-]", "")) end
+
+function NS.GuildName()
+  local c = NS.Loot and NS.Loot.Current()
+  local g = c and c.payload and c.payload.guild
+  return type(g) == "string" and g ~= "" and g or nil
+end
+
+function NS.ForThisGuild()
+  local want = NS.GuildName()
+  if not want then return true end -- nothing configured yet: a fresh install before any data arrived
+  local mine = GetGuildInfo("player")
+  return mine ~= nil and normGuild(mine) == normGuild(want)
+end
+
 -- API check -----------------------------------------------------------------------------------
 -- Forever is built on the Midnight client, but some globals only exist as C_ functions there.
 -- We record what is missing so the backend (and /psync apicheck) can show it.
@@ -156,6 +176,11 @@ local function status()
     local how = info.source == "shared" and ("received in game from " .. (Ambiguate and Ambiguate(info.from or "?", "short") or tostring(info.from))) or "from the bridge app"
     NS.Print("loot sheet data: rev %s, %d items, %s %s.", tostring(info.rev), info.items, how, date("%d/%m %H:%M", info.writtenAt or 0))
   else NS.Print("no loot sheet data yet. The bridge writes it, or another officer's addon shares it in game (%s sync asks now).", SLASH) end
+  local want = NS.GuildName()
+  if want then
+    if NS.ForThisGuild() then NS.Print("serving guild %s.", want)
+    else NS.Print("this character is in %s, not %s: nothing is recorded or shared from here.", GetGuildInfo("player") or "no guild", want) end
+  end
   if NS.Sync then NS.Print(NS.Sync.Status() .. ".") end
   if NS.LootLog then
     local n, week = NS.LootLog.Count()

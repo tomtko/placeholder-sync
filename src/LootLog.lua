@@ -37,7 +37,9 @@ end
 local function put(rec)
   local t = store()
   if not t or not rec.uid or t[rec.uid] then return false end
+  if NS.ForThisGuild and not NS.ForThisGuild() then return false end -- an alt in another guild: not ours to record
   rec.seenAt = time()
+  rec.guild = GetGuildInfo("player") -- the server refuses records from any other guild
   t[rec.uid] = rec
   return true
 end

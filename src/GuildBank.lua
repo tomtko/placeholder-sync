@@ -273,8 +273,16 @@ end
 
 -- Open / close --------------------------------------------------------------------------------------
 
+local saidOtherGuild = false
 local function onOpened()
   if frameOpen then return end
+  if NS.ForThisGuild and not NS.ForThisGuild() then
+    if not saidOtherGuild then
+      saidOtherGuild = true
+      NS.Print("this is %s's bank, not %s's: not recording it.", GetGuildInfo("player") or "another guild", NS.GuildName() or "our guild")
+    end
+    return
+  end
   frameOpen = true
   -- Let the Blizzard frame issue its own first query, then start ours.
   C_Timer.After(0.3, function() if frameOpen then NS.StartScan(false) end end)
