@@ -6,9 +6,12 @@
 ## SavedVariables: PlaceholderSyncDB
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10_Blue
 ## AllowLoadGameType: standard, camelot
+## OptionalDeps: RCLootCouncil, ForeverLoot
 ## X-Website: https://github.com/tomtko
 
 Core.lua
 GuildBank.lua
 Data.lua
 LootData.lua
+Council_RCLC.lua
+Council_FLC.lua

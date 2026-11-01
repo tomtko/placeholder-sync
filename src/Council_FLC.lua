@@ -1,12 +1,13 @@
 --[[
   "Sheet" column in ForeverLoot's award window, through FL.AwardColumns.Register (the guild's fork of
-  ForeverLoot). LoadOnDemand + LoadWith ForeverLoot: never loaded otherwise. The paint callback runs only when
-  ForeverLoot repaints its rows; the tooltip callback only on hover.
+  ForeverLoot). Loading this file only defines functions. Core.lua calls NS.Council.FLC.Start() at login, and
+  only when C_AddOns.IsAddOnLoaded("ForeverLoot") is true; without ForeverLoot nothing here ever runs. The paint
+  callback runs only when ForeverLoot repaints its rows; the tooltip callback only on hover.
 ]]
-local THIS = ...
-local parentName = THIS:gsub("_FLC$", "")
-local PS = _G[parentName]
-if not PS or not PS.Loot then return end
+local ADDON, NS = ...
+local PS = NS
+NS.Council = NS.Council or {}
+local parentName = ADDON
 
 local function register()
   local FL = _G.ForeverLoot
@@ -40,9 +41,7 @@ local function tryRegister()
   if tries < 10 then C_Timer.After(1, tryRegister) end
 end
 
-if IsLoggedIn() then C_Timer.After(0, tryRegister)
-else
-  local f = CreateFrame("Frame")
-  f:RegisterEvent("PLAYER_LOGIN")
-  f:SetScript("OnEvent", function(self) self:UnregisterAllEvents() C_Timer.After(0, tryRegister) end)
-end
+NS.Council.FLC = {
+  addon = "ForeverLoot",
+  Start = function() tries = 0 C_Timer.After(0, tryRegister) end,
+}

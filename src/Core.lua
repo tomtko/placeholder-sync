@@ -171,33 +171,21 @@ SlashCmdList[key] = function(msg)
   end
 end
 
--- Loot council modules ---------------------------------------------------------------------------
--- <Addon>_RCLC and <Addon>_FLC are LoadOnDemand with "## LoadWith"; some clients ignore LoadWith, so we also
--- load them ourselves the moment their council addon is loaded. Nothing is loaded for an addon that is absent.
+-- Loot council columns ---------------------------------------------------------------------------
+-- Council_RCLC.lua and Council_FLC.lua only define functions. Their Start() runs once, at login, and only when
+-- that council addon is loaded; a client without it never executes any of that code.
 
-local MODULES = { RCLootCouncil = "_RCLC", ForeverLoot = "_FLC" }
+local started = {}
 
-local function loadModuleFor(councilAddon)
-  local suffix = MODULES[councilAddon]
-  if not suffix then return end
-  local name = ADDON .. suffix
+function NS.StartCouncilColumns()
   local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
-  local loadAddOn = (C_AddOns and C_AddOns.LoadAddOn) or _G.LoadAddOn
-  if not isLoaded or not loadAddOn then return end
-  if isLoaded(name) then return end
-  local ok, loaded, reason = pcall(loadAddOn, name)
-  if ok and loaded then
-    NS.Print("%s column loaded for %s.", suffix:sub(2), councilAddon)
-  elseif ok and reason and reason ~= "MISSING" then
-    NS.Print("could not load %s (%s). Enable it in the AddOns list.", name, tostring(reason))
-  end
-end
-
-function NS.LoadModules()
-  local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
-  if not isLoaded then return end
-  for council in pairs(MODULES) do
-    if isLoaded(council) then loadModuleFor(council) end
+  if not isLoaded or not NS.Council then return end
+  for key, mod in pairs(NS.Council) do
+    if not started[key] and mod.addon and isLoaded(mod.addon) then
+      started[key] = true
+      local ok, err = pcall(mod.Start)
+      if not ok then NS.Print("%s column failed to start: %s", key, tostring(err)) end
+    end
   end
 end
 
@@ -211,12 +199,12 @@ frame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
     if arg1 == ADDON then
       NS.InitDB()
-    elseif MODULES[arg1] then
-      loadModuleFor(arg1) -- a council addon loaded after us (load order, or load-on-demand)
+    elseif IsLoggedIn() and (arg1 == "RCLootCouncil" or arg1 == "ForeverLoot") then
+      NS.StartCouncilColumns() -- a council addon loaded on demand after login
     end
   elseif event == "PLAYER_LOGIN" then
     if not NS.db then NS.InitDB() end
-    NS.LoadModules()
+    NS.StartCouncilColumns()
     local missing = NS.ApiCheck()
     pcall(NS.RecordCharacter)
     if #missing > 0 then

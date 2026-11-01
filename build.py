@@ -55,28 +55,8 @@ def main() -> int:
     toc = re.sub(r"^## SavedVariables:.*$", f"## SavedVariables: {addon}DB", toc, flags=re.M)
     (stage / f"{addon}.toc").write_text(toc, encoding="utf-8")
 
-    # Load-on-demand modules: <Addon>_RCLC and <Addon>_FLC, each loaded by the client only with its council addon.
-    modules = {}
-    for mod_dir in sorted((ROOT / "addon" / "modules").iterdir()):
-        if not mod_dir.is_dir():
-            continue
-        suffix = mod_dir.name  # RCLC / FLC
-        mod_name = f"{addon}_{suffix}"
-        mod_stage = DIST / mod_name
-        if mod_stage.exists():
-            shutil.rmtree(mod_stage)
-        mod_stage.mkdir(parents=True)
-        for f in sorted(mod_dir.iterdir()):
-            text = f.read_text(encoding="utf-8")
-            if f.suffix == ".toc":
-                text = re.sub(r"^## Title:.*$", f"## Title: {addon}: " + {"RCLC": "RCLootCouncil", "FLC": "ForeverLoot"}.get(suffix, suffix) + " column", text, flags=re.M)
-                text = re.sub(r"^## Version:.*$", f"## Version: {version}", text, flags=re.M)
-                text = re.sub(r"^(## Dependencies: )\w+", rf"\g<1>{addon}", text, flags=re.M)
-                out_name = f"{mod_name}.toc"
-            else:
-                out_name = f.name
-            (mod_stage / out_name).write_text(text, encoding="utf-8")
-        modules[mod_name] = mod_stage
+    modules = {}  # the council columns live inside the main addon now (Council_*.lua)
+    stale_module_folders = [f"{addon}_RCLC", f"{addon}_FLC"]
 
     zip_path = DIST / f"{addon}-{version}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -90,6 +70,9 @@ def main() -> int:
         addons_dir = Path(args.wow) / args.flavor / "Interface" / "AddOns"
         if not addons_dir.is_dir():
             sys.exit(f"AddOns folder not found: {addons_dir}")
+        for stale in stale_module_folders:  # left over from 0.2.0 builds that shipped sub-addons
+            if (addons_dir / stale).is_dir():
+                shutil.rmtree(addons_dir / stale)
         for folder, src in [(addon, stage), *modules.items()]:
             target = addons_dir / folder
             keep_data = target / "Data.lua"

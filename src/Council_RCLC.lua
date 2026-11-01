@@ -1,18 +1,15 @@
 --[[
-  "Sheet" column in RCLootCouncil's voting frame. This sub-addon is LoadOnDemand + LoadWith RCLootCouncil, so the
-  client only loads it when RCLC itself is loaded. It uses RCLC's Column API (RCVotingFrame:AddColumn, 3.x).
-  Work happens only when RCLC redraws a cell; the tooltip handler is attached once per cell frame.
+  "Sheet" column in RCLootCouncil's voting frame, through RCLC's Column API (RCVotingFrame:AddColumn, 3.x).
+  Loading this file only defines functions. Core.lua calls NS.Council.RCLC.Start() at login, and only when
+  C_AddOns.IsAddOnLoaded("RCLootCouncil") is true; without RCLC nothing here ever runs. Work happens only when
+  RCLC redraws a cell; the tooltip handler is attached once per cell frame.
 ]]
-local THIS = ...
-local parentName = THIS:gsub("_RCLC$", "")
-local PS = _G[parentName]
-if not PS or not PS.Loot then return end
+local ADDON, NS = ...
+local PS = NS
+NS.Council = NS.Council or {}
 
-local Ace = LibStub and LibStub("AceAddon-3.0", true)
-local rclc = Ace and Ace:GetAddon("RCLootCouncil", true)
-if not rclc then return end
-
-local COL = parentName .. "Sheet"
+local COL = ADDON .. "Sheet"
+local rclc
 
 local function currentItemLink(VF)
   local session = VF:GetCurrentSession()
@@ -48,6 +45,9 @@ local function cellUpdate(rowFrame, frame, data, cols, row, realrow, column, fSh
 end
 
 local function setup()
+  local Ace = LibStub and LibStub("AceAddon-3.0", true)
+  rclc = Ace and Ace:GetAddon("RCLootCouncil", true)
+  if not rclc then return false end
   local VF = rclc:GetModule("RCVotingFrame", true)
   if not VF or not VF.AddColumn or not VF.scrollCols then return false end
   VFref = VF
@@ -76,10 +76,7 @@ local function trySetup()
   if tries < 10 then C_Timer.After(1, trySetup) end
 end
 
-if IsLoggedIn() then
-  C_Timer.After(0, trySetup)
-else
-  local f = CreateFrame("Frame")
-  f:RegisterEvent("PLAYER_LOGIN")
-  f:SetScript("OnEvent", function(self) self:UnregisterAllEvents() C_Timer.After(0, trySetup) end)
-end
+NS.Council.RCLC = {
+  addon = "RCLootCouncil",
+  Start = function() tries = 0 C_Timer.After(0, trySetup) end,
+}
