@@ -42,6 +42,7 @@ local DIM = { 0.3, 0.3, 0.3 }
 
 local index -- nil = not built, false = no data, table = built
 local resolveCache = {}
+local ago -- defined below
 
 local function bridgeData()
   return _G[ADDON .. "_Data"]
@@ -76,8 +77,12 @@ local function build()
   index = {
     rev = d.rev, writtenAt = d.writtenAt, generatedAt = p.generatedAt or d.generatedAt, source = d.source, from = d.from,
     items = p.items or {}, names = p.names or {}, chars = p.chars or {}, owned = p.owned or {},
-    need = {}, prio = {}, byHalf = {},
+    need = {}, prio = {}, byHalf = {}, hasPrio = type(p.prio) == "table", officers = nil,
   }
+  if type(p.officers) == "table" then -- optional explicit list from the bot; otherwise the sheet rank decides
+    index.officers = {}
+    for _, key in ipairs(p.officers) do index.officers[key] = true end
+  end
   for id, list in pairs(p.needers or {}) do index.need[id] = position(list) end
   for id, list in pairs(p.prio or {}) do index.prio[id] = position(list) end
   -- Forever names are "First Last"; some sources give one half. Map each half to the keys that contain it.
@@ -179,6 +184,64 @@ function Loot.Standing(linkOrKey, name)
   return st
 end
 
+local OFFICER_RANKS = { officer = true, gm = true, ["guild master"] = true, ["co-gm"] = true, ["guild lead"] = true }
+
+--- Is this sheet character an officer? Decides who may hold the officer Prio layer (Sync.lua). nil = no data.
+function Loot.IsOfficerKey(key)
+  local idx = Loot.Ensure()
+  if not idx or not key then return nil end
+  if idx.officers then return idx.officers[key] == true end
+  local c = idx.chars[key]
+  local rk = c and type(c.rk) == "string" and c.rk:lower() or ""
+  return OFFICER_RANKS[rk] == true
+end
+
+--- "Name-Realm" → officer or not (false when the sheet does not know them).
+function Loot.IsOfficer(name)
+  local key = Loot.ResolveKey(name)
+  return key and Loot.IsOfficerKey(key) or false
+end
+
+--- Does the data in use carry the officer Prio layer?
+function Loot.HasPrio()
+  local idx = Loot.Ensure()
+  return idx and idx.hasPrio or false
+end
+
+--- What a raider may see about their own standing: "Wishlist" or "Owned", never a rank. nil = nothing to show.
+function Loot.SelfText(st)
+  if not st or st.unknownItem or not st.char then return nil end
+  if st.has then return "Owned", unpack(GREY) end
+  if st.need then return "Wishlist", unpack(WANTS) end
+  return nil
+end
+
+--- Tooltip for the raider's own respond window: their wishlist standing only, no ranks and no other names.
+function Loot.SelfTooltip(owner, linkOrKey, name)
+  local idx = Loot.Ensure()
+  if not idx then return end
+  local st = Loot.Standing(linkOrKey, name)
+  local item = st and st.item
+  GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+  GameTooltip:AddLine(item and item.n or "Item not on the loot sheet", 1, 1, 1, true)
+  if item and (item.s or item.b) then GameTooltip:AddLine((item.s or "") .. (item.b and ("  ·  " .. item.b) or ""), GREY[1], GREY[2], GREY[3], true) end
+  GameTooltip:AddLine(" ")
+  if st and st.unknownItem then
+    GameTooltip:AddLine("The loot sheet does not list this item.", GREY[1], GREY[2], GREY[3], true)
+  elseif not st or not st.char then
+    GameTooltip:AddLine("You are not on the loot sheet.", GREY[1], GREY[2], GREY[3], true)
+  else
+    if st.has then GameTooltip:AddLine("You already have it  (Loot Log " .. tostring(st.has) .. ")", GREY[1], GREY[2], GREY[3], true)
+    elseif st.need then GameTooltip:AddLine("On your wishlist" .. (st.needOf and st.needOf > 1 and ("  (" .. st.needOf .. " people want it)") or ""), WANTS[1], WANTS[2], WANTS[3], true)
+    else GameTooltip:AddLine("Not on your wishlist", GREY[1], GREY[2], GREY[3], true) end
+    local c = st.char
+    if c.of and c.of > 0 then GameTooltip:AddLine("BiS progress " .. (c.bis or 0) .. " / " .. c.of, GREY[1], GREY[2], GREY[3], true) end
+  end
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddLine("Sheet data from " .. ago(idx.generatedAt and math.floor(idx.generatedAt / 1000) or nil), DIM[1], DIM[2], DIM[3], true)
+  GameTooltip:Show()
+end
+
 --- Short cell text plus colour.
 function Loot.CellText(st)
   if not st then return "", unpack(DIM) end
@@ -200,7 +263,7 @@ function Loot.SortValue(st)
   return 0
 end
 
-local function ago(unix)
+function ago(unix)
   if not unix then return "unknown" end
   local s = time() - unix
   if s < 90 then return "just now" end

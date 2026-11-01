@@ -4,8 +4,10 @@
   C_EncodingUtil for CBOR + zlib + base64, and a queue for anything that comes up while the client restricts
   addon chat (ADDON_RESTRICTION_STATE_CHANGED, in-instance combat on the Midnight engine) or we are in combat.
 
-  Two datasets travel, each with its own version number:
-    L  the officers' loot sheet (bridge Data.lua or a shared copy), version = rev            (into the game)
+  Three datasets travel, each with its own version number:
+    L  the loot sheet without the officer Prio layer, version = rev                          (into the game)
+    P  the officer Prio layer for one L rev, whispered only to characters the sheet ranks as officers;
+       a non-officer's SavedVariables never contains it, so there is nothing to go looking for
     B  the guild bank scan (<Addon>DB.guildBank), version = scan time, complete scans only   (out of the game)
   Anyone who opens the guild bank produces a B; it spreads to every addon user, so the PC with the bridge
   holds the newest scan from whoever opened the bank and uploads it at that officer's next /reload or logout.
@@ -13,7 +15,7 @@
 
   Wire protocol, one message per AceComm send (prefix = addon name, first byte = protocol version):
     2H<lootRev>,<bankAt>        "have": 10 s after login, every 5 minutes, after a change, in reply to an older H
-    2R<kind><ver>               "request": send me <kind> if yours is newer than ver
+    2R<kind><ver>               "request": send me <kind> if yours is newer than ver (P: exactly ver, answered by whisper)
     2S<kind><ver>               "sending": one chunk, goes out right before a D so other holders stand down
     2D<kind><ver>:<gen>:<b64>   the data: CBOR, zlib, base64 (loot about 15 KB, bank about 8 KB)
 
@@ -98,6 +100,12 @@ local function countKeys(t) local n = 0 for _ in pairs(t or {}) do n = n + 1 end
 
 local SETS = {}
 
+local function withoutPrio(payload)
+  local out = {}
+  for k, v in pairs(payload) do if k ~= "prio" then out[k] = v end end
+  return out
+end
+
 SETS.L = {
   name = "loot sheet",
   version = function()
@@ -108,7 +116,7 @@ SETS.L = {
   current = function()
     local c = NS.Loot and NS.Loot.Current()
     if not c then return nil end
-    return c.payload, tonumber(c.generatedAt) or 0
+    return withoutPrio(c.payload), tonumber(c.generatedAt) or 0
   end,
   plausible = function(p)
     if type(p) ~= "table" or type(p.items) ~= "table" or type(p.chars) ~= "table" then return false end
@@ -126,6 +134,35 @@ SETS.L = {
     if NS.db then NS.db.lootShared = nil end
     if NS.Loot then NS.Loot.Reset() end
   end,
+}
+
+-- The officer Prio layer: { prio = { [ikey] = { ckey, ... } } } for exactly one L rev.
+SETS.P = {
+  name = "officer prio",
+  whisperOnly = true,
+  version = function()
+    local c = NS.Loot and NS.Loot.Current()
+    if not c or type(c.payload.prio) ~= "table" then return 0 end
+    return c.rev
+  end,
+  current = function()
+    local c = NS.Loot and NS.Loot.Current()
+    if not c or type(c.payload.prio) ~= "table" then return nil end
+    return { prio = c.payload.prio }, 0
+  end,
+  plausible = function(p)
+    return type(p) == "table" and type(p.prio) == "table" and countKeys(p.prio) <= 5000
+  end,
+  apply = function(ver, _, p, sender)
+    local c = NS.Loot and NS.Loot.Current()
+    if not c or c.rev ~= ver or c.source ~= "shared" then return end
+    if not NS.Loot.IsOfficer(me) then return end
+    NS.db.lootShared.payload.prio = p.prio
+    NS.db.lootShared.prioRev = ver
+    NS.Loot.Reset()
+    NS.Print("officer Prio for loot sheet rev %d received from %s.", ver, short(sender))
+  end,
+  forget = function() end, -- lives inside lootShared, dropped with it
 }
 
 SETS.B = {
@@ -240,10 +277,13 @@ local function sendRequest(kind, ch)
   Ace:SendCommMessage(PREFIX, PROTO .. "R" .. kind .. SETS[kind].version(), ch, nil, "NORMAL")
 end
 
+-- ch is "GUILD", "RAID", or "WHISPER:<Name-Realm>" for the officer-only Prio layer.
 local function sendData(kind, ch, to)
   local ks = kstate(kind)
   ks.pendingSend[ch] = nil
-  if not channelOpen(ch) then return end
+  local dist, target = ch, nil
+  if ch:sub(1, 8) == "WHISPER:" then dist, target = "WHISPER", ch:sub(9) end
+  if dist ~= "WHISPER" and not channelOpen(ch) then return end
   if not canSendNow() then later("D" .. kind .. ch, function() sendData(kind, ch, to) end) return end
   local now = GetTime()
   if (ks.lastSend[ch] or 0) > now - QUIET then return end
@@ -257,8 +297,8 @@ local function sendData(kind, ch, to)
   ks.lastSend[ch] = now
   state.sent = state.sent + 1
   ks.lastShared = { to = to, ver = ver, at = time() }
-  Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, ch, nil, "ALERT")
-  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, ch, nil, "BULK")
+  if dist ~= "WHISPER" then Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, dist, nil, "ALERT") end
+  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, dist, target, "BULK")
 end
 
 local function scheduleRequest(kind, ch, theirVer)
@@ -296,32 +336,41 @@ local function apply(kind, ver, gen, b64, sender)
   local p = decode(b64)
   if not p or not set.plausible(p) then return end
   if set.version() >= ver then return end
+  if kind == "P" and SETS.L.version() ~= ver then return end -- a Prio layer for a rev we do not hold
   set.apply(ver, gen, p, sender)
   local ks = kstate(kind)
   ks.encodedVer, ks.encoded = ver, b64 -- we can pass it on as is
   state.received = state.received + 1
 end
 
+local requestPrio -- defined below
+
 local function onComm(_, msg, channel, sender)
   if type(msg) ~= "string" or msg:sub(1, 1) ~= PROTO then return end
-  if channel ~= "GUILD" and channel ~= "RAID" then return end
   if isMe(sender) then return end
   local op = msg:sub(2, 2)
+  local kind = msg:sub(3, 3)
+  if channel == "WHISPER" then
+    if not (op == "D" and kind == "P") then return end -- only the Prio layer travels by whisper
+  elseif channel ~= "GUILD" and channel ~= "RAID" then
+    return
+  end
   if op == "H" then
     local l, b = msg:match("^.H(%d+),(%d+)$")
     l, b = tonumber(l), tonumber(b)
     if not l or not b then return end
     state.seenHave[channel] = { at = GetTime(), L = l, B = b }
     local theirs, behind = { L = l, B = b }, false
-    for kind, set in pairs(SETS) do
-      local mine = set.version()
-      if theirs[kind] > mine then scheduleRequest(kind, channel, theirs[kind])
-      elseif theirs[kind] < mine then behind = true end
+    for k, set in pairs(SETS) do
+      if theirs[k] then
+        local mine = set.version()
+        if theirs[k] > mine then scheduleRequest(k, channel, theirs[k])
+        elseif theirs[k] < mine then behind = true end
+      end
     end
     if behind then scheduleHave(channel) end -- they are behind: tell them, they will ask
     return
   end
-  local kind = msg:sub(3, 3)
   local set = SETS[kind]
   if not set then return end
   local ks = kstate(kind)
@@ -332,7 +381,12 @@ local function onComm(_, msg, channel, sender)
     local now = GetTime()
     if (ks.inbound[sender] or 0) > now - INBOUND_QUIET then return end
     ks.inbound[sender] = now
-    if mine > ver then scheduleSend(kind, channel, sender) end
+    if kind == "P" then
+      -- Exactly this rev, and only to someone the sheet ranks as an officer, by whisper.
+      if mine == ver and NS.Loot and NS.Loot.IsOfficer(sender) then scheduleSend("P", "WHISPER:" .. sender, sender) end
+    elseif mine > ver then
+      scheduleSend(kind, channel, sender)
+    end
   elseif op == "S" then
     local ver = tonumber(msg:sub(4))
     if not ver then return end
@@ -347,11 +401,21 @@ local function onComm(_, msg, channel, sender)
     if ver >= mine then cancelSend(kind, channel) end
     if ver <= mine then return end
     if InCombatLockdown() then
-      if not ks.stash or ks.stash.ver < ver then ks.stash = { ver = ver, gen = tonumber(gen), b64 = b64, sender = sender } end
+      if not ks.stash or ks.stash.ver < ver then ks.stash = { ver = ver, gen = tonumber(gen), b64 = b64, sender = sender, channel = channel } end
       return
     end
     apply(kind, ver, tonumber(gen), b64, sender)
+    if kind == "L" then C_Timer.After(1, function() requestPrio(channel) end) end
   end
+end
+
+--- Officers: ask for the Prio layer of the loot sheet rev we hold, when we do not have it yet.
+requestPrio = function(ch)
+  if not NS.Loot or SETS.L.version() == 0 or SETS.P.version() ~= 0 then return end
+  if not NS.Loot.IsOfficer(me) then return end
+  if ch ~= "GUILD" and ch ~= "RAID" then ch = IsInGuild() and "GUILD" or (inHomeRaid() and "RAID" or nil) end
+  if not ch then return end
+  scheduleRequest("P", ch, SETS.L.version())
 end
 
 -- Lifecycle -------------------------------------------------------------------------------------
@@ -367,6 +431,7 @@ end
 
 function Sync.Announce()
   for _, ch in ipairs(channels()) do sendHave(ch) end
+  requestPrio(nil)
 end
 
 --- Something we hold changed (bank closed after a scan, loot file reloaded): announce it right away.
@@ -382,9 +447,13 @@ function Sync.RequestNow()
   local chs = channels()
   if #chs == 0 then NS.Print("not in a guild or raid, nobody to ask.") return end
   for kind in pairs(SETS) do
-    kstate(kind).lastRequest = 0
-    for _, ch in ipairs(chs) do sendRequest(kind, ch) end
+    if kind ~= "P" then
+      kstate(kind).lastRequest = 0
+      for _, ch in ipairs(chs) do sendRequest(kind, ch) end
+    end
   end
+  kstate("P").lastRequest = 0
+  requestPrio(chs[1])
   NS.Print("asked %s for loot sheet data newer than rev %d and bank scans newer than %s.",
     table.concat(chs, " and "):lower(), SETS.L.version(), SETS.B.version() > 0 and date("%d/%m %H:%M", SETS.B.version()) or "none")
 end
@@ -403,6 +472,9 @@ function Sync.Status()
   for kind, set in pairs(SETS) do
     local ls = K[kind] and K[kind].lastShared
     if ls then parts[#parts + 1] = ("%s last sent to %s %ds ago"):format(set.name, short(ls.to), time() - ls.at) end
+  end
+  if SETS.L.version() > 0 then
+    parts[#parts + 1] = SETS.P.version() > 0 and "officer Prio layer present" or (NS.Loot.IsOfficer(me) and "officer Prio layer not received yet" or "no officer Prio layer (not an officer on the sheet)")
   end
   local gb = NS.db and NS.db.guildBank
   if gb and gb.sharedFrom then parts[#parts + 1] = ("bank scan here is %s's, received %s"):format(short(gb.sharedFrom), date("%d/%m %H:%M", gb.receivedAt or 0)) end
@@ -429,7 +501,10 @@ function Sync.Start()
       for kind, ks in pairs(K) do
         local s = ks.stash
         ks.stash = nil
-        if s and s.ver > SETS[kind].version() then apply(kind, s.ver, s.gen, s.b64, s.sender) end
+        if s and s.ver > SETS[kind].version() then
+          apply(kind, s.ver, s.gen, s.b64, s.sender)
+          if kind == "L" then C_Timer.After(1, function() requestPrio(s.channel) end) end
+        end
       end
       flush()
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" then

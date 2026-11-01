@@ -31,6 +31,19 @@ local function register()
       return PS.Loot.SortValue(link and PS.Loot.Standing(link, entry and entry.name) or nil)
     end,
   })
+  -- The raider's own respond card: "Wishlist" / "Owned" and a tooltip about them only, never a rank.
+  if FL.RespondBadges and FL.RespondBadges.Register then
+    FL.RespondBadges.Register({
+      id = parentName .. "Sheet",
+      text = function(entry)
+        local link = entry and entry.itemLink
+        return PS.Loot.SelfText(link and PS.Loot.Standing(link, PS.PlayerKey()) or nil)
+      end,
+      tooltip = function(owner, entry)
+        if entry and entry.itemLink then PS.Loot.SelfTooltip(owner, entry.itemLink, PS.PlayerKey()) end
+      end,
+    })
+  end
   return true
 end
 

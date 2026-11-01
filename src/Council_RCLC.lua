@@ -69,9 +69,49 @@ local function setup()
   return true
 end
 
+-- Raider side: RCLC's loot frame (the Need/Greed-style popup). Same hook WowUtils uses: every entry gets a
+-- small label top right with "Wishlist" / "Owned" for the player themself, and a tooltip about them only.
+local function paintEntry(entry)
+  local f = entry and entry.frame
+  if not f then return end
+  if not f.psBadge then
+    local b = CreateFrame("Button", nil, f)
+    b:SetSize(64, 14)
+    b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -6)
+    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b.text:SetAllPoints(b)
+    b.text:SetJustifyH("RIGHT")
+    b:SetScript("OnEnter", function(self) if self.psLink then PS.Loot.SelfTooltip(self, self.psLink, PS.PlayerKey()) end end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    f.psBadge = b
+  end
+  local item = entry.item
+  local link = type(item) == "table" and (item.link or item.itemLink) or item
+  local text, r, g, b = PS.Loot.SelfText(link and PS.Loot.Standing(link, PS.PlayerKey()) or nil)
+  f.psBadge.psLink = link
+  f.psBadge.text:SetText(text or "")
+  if text then f.psBadge.text:SetTextColor(r, g, b) end
+  f.psBadge:SetShown(text ~= nil)
+end
+
+local function hookLootFrame()
+  local LF = rclc and rclc:GetModule("RCLootFrame", true)
+  local mgr = LF and LF.EntryManager
+  if not mgr or type(mgr.GetEntry) ~= "function" or mgr.psHooked then return end
+  mgr.psHooked = true
+  hooksecurefunc(mgr, "GetEntry", function(self, item, isOurs)
+    if isOurs then return end
+    local ok, entry = pcall(self.GetEntry, self, item, true)
+    if not ok or type(entry) ~= "table" or entry.psHooked then return end
+    entry.psHooked = true
+    if type(entry.Update) == "function" then hooksecurefunc(entry, "Update", function(e) pcall(paintEntry, e) end) end
+    pcall(paintEntry, entry)
+  end)
+end
+
 local tries = 0
 local function trySetup()
-  if setup() then return end
+  if setup() then pcall(hookLootFrame) return end
   tries = tries + 1
   if tries < 10 then C_Timer.After(1, trySetup) end
 end
