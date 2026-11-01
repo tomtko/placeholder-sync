@@ -43,8 +43,24 @@ local DIM = { 0.3, 0.3, 0.3 }
 local index -- nil = not built, false = no data, table = built
 local resolveCache = {}
 
-local function rawData()
+local function bridgeData()
   return _G[ADDON .. "_Data"]
+end
+
+--- The dataset in use: the bridge's Data.lua or a copy another officer shared in game (Sync.lua), whichever
+--- rev is newer. { rev, generatedAt, writtenAt, payload, source = "bridge"|"shared", from } or nil.
+function Loot.Current()
+  local b = bridgeData()
+  local s = NS.db and NS.db.lootShared
+  local brev = b and type(b.payload) == "table" and tonumber(b.rev) or nil
+  local srev = s and type(s.payload) == "table" and tonumber(s.rev) or nil
+  if srev and brev and brev >= srev then NS.db.lootShared = nil srev = nil end -- the bridge caught up: drop the copy
+  if srev then
+    return { rev = srev, generatedAt = s.generatedAt, writtenAt = s.receivedAt, payload = s.payload, source = "shared", from = s.from }
+  elseif brev then
+    return { rev = brev, generatedAt = b.generatedAt, writtenAt = b.writtenAt, payload = b.payload, source = "bridge" }
+  end
+  return nil
 end
 
 local function position(list)
@@ -54,11 +70,11 @@ local function position(list)
 end
 
 local function build()
-  local d = rawData()
+  local d = Loot.Current()
   local p = d and d.payload
   if type(p) ~= "table" then index = false return end
   index = {
-    rev = d.rev, writtenAt = d.writtenAt, generatedAt = p.generatedAt,
+    rev = d.rev, writtenAt = d.writtenAt, generatedAt = p.generatedAt or d.generatedAt, source = d.source, from = d.from,
     items = p.items or {}, names = p.names or {}, chars = p.chars or {}, owned = p.owned or {},
     need = {}, prio = {}, byHalf = {},
   }
@@ -84,18 +100,18 @@ function Loot.Ensure()
   return index or nil
 end
 
---- Drop the index (e.g. after the bridge wrote a new file and the officer reloaded: a reload rebuilds anyway).
+--- Drop the index: after a shared copy arrives (Sync.lua), or /psync forget. The next cell paint rebuilds it.
 function Loot.Reset()
   index = nil
   wipe(resolveCache)
 end
 
 function Loot.Info()
-  local d = rawData()
-  if not d or not d.payload then return nil end
+  local d = Loot.Current()
+  if not d then return nil end
   local n = 0
   for _ in pairs(d.payload.items or {}) do n = n + 1 end
-  return { rev = d.rev, writtenAt = d.writtenAt, generatedAt = d.payload.generatedAt, items = n }
+  return { rev = d.rev, writtenAt = d.writtenAt, generatedAt = d.payload.generatedAt or d.generatedAt, items = n, source = d.source, from = d.from }
 end
 
 function Loot.ItemId(link)
@@ -246,7 +262,8 @@ function Loot.NeederLines(linkOrKey, n)
     end
     if nd.n > (n or 5) then out[#out + 1] = { "  …", DIM[1], DIM[2], DIM[3] } end
   end
-  out[#out + 1] = { "Sheet data from " .. ago(idx.generatedAt and math.floor(idx.generatedAt / 1000) or nil) .. ", written " .. ago(idx.writtenAt), DIM[1], DIM[2], DIM[3] }
+  local how = idx.source == "shared" and ("received from " .. (Ambiguate and Ambiguate(idx.from or "?", "short") or idx.from or "?") .. " ") or "written "
+  out[#out + 1] = { "Sheet data from " .. ago(idx.generatedAt and math.floor(idx.generatedAt / 1000) or nil) .. ", " .. how .. ago(idx.writtenAt), DIM[1], DIM[2], DIM[3] }
   return out
 end
 

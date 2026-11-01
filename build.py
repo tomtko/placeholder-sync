@@ -39,15 +39,19 @@ def main() -> int:
     stage.mkdir(parents=True)
 
     toc_src = next(SRC.glob("*.toc"))
-    for f in sorted(SRC.iterdir()):
-        if f.suffix == ".toc":
+    for f in sorted(SRC.rglob("*")):
+        if f.is_dir() or f.suffix == ".toc":
             continue
-        text = f.read_text(encoding="utf-8")
+        rel = f.relative_to(SRC)
+        (stage / rel).parent.mkdir(parents=True, exist_ok=True)
         if f.name == "Core.lua":
+            text = f.read_text(encoding="utf-8")
             text, n = re.subn(r'^local SLASH = "/[^"]*" -- @brand:slash$', f'local SLASH = "/{slash}" -- @brand:slash', text, flags=re.M)
             if n != 1:
                 sys.exit("Core.lua: @brand:slash marker not found")
-        (stage / f.name).write_text(text, encoding="utf-8")
+            (stage / rel).write_text(text, encoding="utf-8")
+        else:
+            shutil.copy2(f, stage / rel)  # Lua, xml and the vendored Libs/ tree, byte for byte
 
     toc = toc_src.read_text(encoding="utf-8")
     toc = re.sub(r"^## Title:.*$", f"## Title: {addon}", toc, flags=re.M)

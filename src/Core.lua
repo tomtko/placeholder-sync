@@ -9,6 +9,7 @@
       meta       = { addonVersion, client, interface, flavor, savedAt },
       guildBank  = { guild, realm, by, at, money, complete, tabs = { { index, name, icon, items = { ... } } } },
       characters = { [guid] = { name, realm, class, level, updatedAt } },   -- identity only for now
+      lootShared = { rev, generatedAt, receivedAt, from, payload },          -- loot sheet copy from another officer (Sync.lua)
       _apiCheck  = { "GetGuildBankItemLink", ... },                          -- API names missing on this client
     }
 ]]
@@ -111,6 +112,10 @@ local REQUIRED = {
   "GetGuildBankItemLink", "GetGuildBankMoney", "GetCurrentGuildBankTab", "GetGuildInfo",
   "GetRealmName", "UnitName", "UnitGUID", "UnitClass", "UnitLevel", "ReloadUI", "C_Timer.NewTimer",
   "C_Timer.After",
+  -- in-game sharing of the loot sheet (Sync.lua); missing ones switch sharing off, nothing else breaks
+  "C_ChatInfo.SendAddonMessage", "C_ChatInfo.RegisterAddonMessagePrefix", "C_EncodingUtil.SerializeCBOR",
+  "C_EncodingUtil.DeserializeCBOR", "C_EncodingUtil.CompressString", "C_EncodingUtil.DecompressString",
+  "C_EncodingUtil.EncodeBase64", "C_EncodingUtil.DecodeBase64",
 }
 
 local function resolve(path)
@@ -146,8 +151,11 @@ local function status()
       NS.pendingUpload and ("Uploads at your next /reload or logout (" .. SLASH .. " reload does it now).") or "Already written to disk.")
   end
   local info = NS.Loot and NS.Loot.Info()
-  if info then NS.Print("loot sheet data: rev %s, %d items, written %s.", tostring(info.rev), info.items, date("%d/%m %H:%M", info.writtenAt or 0))
-  else NS.Print("no loot sheet data yet (the bridge writes Data.lua; it lands at the next /reload).") end
+  if info then
+    local how = info.source == "shared" and ("received in game from " .. (Ambiguate and Ambiguate(info.from or "?", "short") or tostring(info.from))) or "from the bridge app"
+    NS.Print("loot sheet data: rev %s, %d items, %s %s.", tostring(info.rev), info.items, how, date("%d/%m %H:%M", info.writtenAt or 0))
+  else NS.Print("no loot sheet data yet. The bridge writes it, or another officer's addon shares it in game (%s sync asks now).", SLASH) end
+  if NS.Sync then NS.Print(NS.Sync.Status() .. ".") end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
 end
@@ -164,10 +172,14 @@ SlashCmdList[key] = function(msg)
     else NS.Print("missing: %s", table.concat(missing, ", ")) end
   elseif msg == "scan" then
     if NS.StartScan then NS.StartScan(true) end
+  elseif msg == "sync" then
+    if NS.Sync then NS.Sync.RequestNow() end
+  elseif msg == "forget" then
+    if NS.Sync then NS.Sync.Forget() end
   elseif msg == "" or msg == "status" then
     status()
   else
-    NS.Print("%s  |  %s reload  |  %s scan  |  %s apicheck", SLASH, SLASH, SLASH, SLASH)
+    NS.Print("%s  |  %s reload  |  %s scan  |  %s sync  |  %s forget  |  %s apicheck", SLASH, SLASH, SLASH, SLASH, SLASH, SLASH)
   end
 end
 
@@ -207,6 +219,10 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     NS.StartCouncilColumns()
     local missing = NS.ApiCheck()
     pcall(NS.RecordCharacter)
+    if NS.Sync then
+      local ok, err = pcall(NS.Sync.Start)
+      if not ok then NS.Print("sharing failed to start: %s", tostring(err)) end
+    end
     if #missing > 0 then
       NS.Print("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
     end

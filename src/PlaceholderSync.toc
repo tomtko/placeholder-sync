@@ -1,6 +1,6 @@
 ## Interface: 120105, 16001
 ## Title: PlaceholderSync
-## Notes: Records the guild bank (and later your characters) so the bridge app can upload it for the guild.
+## Notes: Records the guild bank for the bridge app, shows the officers' loot sheet in the council window and shares it with the guild in game.
 ## Author: tomtko
 ## Version: 0.1.0
 ## SavedVariables: PlaceholderSyncDB
@@ -9,9 +9,11 @@
 ## OptionalDeps: RCLootCouncil, ForeverLoot
 ## X-Website: https://github.com/tomtko
 
+embeds.xml
 Core.lua
 GuildBank.lua
 Data.lua
 LootData.lua
+Sync.lua
 Council_RCLC.lua
 Council_FLC.lua
