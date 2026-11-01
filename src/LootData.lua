@@ -22,6 +22,18 @@ NS.Loot = Loot
 
 local GOLD = { 1, 0.82, 0 }
 local GREEN = { 0.25, 1, 0.25 }
+-- The Loot tab has six Prio columns; each rank gets its own colour so the column reads at a glance.
+local PRIO_SLOTS = 6
+local PRIO_COLOURS = {
+  [1] = { 1, 0.82, 0 },        -- gold
+  [2] = { 0.85, 0.88, 0.95 },  -- silver
+  [3] = { 0.85, 0.55, 0.25 },  -- bronze
+  [4] = { 0.55, 0.8, 1 },      -- light blue
+  [5] = { 0.65, 0.65, 0.7 },   -- grey
+  [6] = { 0.5, 0.5, 0.55 },    -- dim grey
+}
+local function prioColour(rank) return PRIO_COLOURS[rank] or PRIO_COLOURS[6] end
+local function prioText(st) return "#" .. st.prio .. "/" .. math.max(PRIO_SLOTS, st.prioOf or 0) end
 local WHITE = { 1, 1, 1 }
 local GREY = { 0.55, 0.55, 0.55 }
 local DIM = { 0.4, 0.4, 0.4 }
@@ -154,7 +166,7 @@ function Loot.CellText(st)
   if not st then return "", unpack(DIM) end
   if st.unknownItem then return "\226\128\148", unpack(DIM) end
   if not st.char then return "?", unpack(DIM) end
-  if st.prio then return "P" .. st.prio, unpack(GOLD) end
+  if st.prio then return prioText(st), unpack(prioColour(st.prio)) end
   if st.has then return "has", unpack(GREY) end
   if st.need then return "Wants", unpack(GREEN) end
   return "\226\128\148", unpack(DIM) -- em dash: not on their list
@@ -198,7 +210,7 @@ function Loot.TooltipLines(st, name)
     add(c.n .. "  (" .. (c.p or "?") .. ")", WHITE)
     add((c.rk or "") .. (c.st and c.st ~= "" and ("  ·  " .. c.st) or "") .. (c.sp and c.sp ~= "" and ("  ·  " .. c.sp) or ""), GREY)
     add(" ", WHITE)
-    if st.prio then add("Officer Prio pick #" .. st.prio .. (st.prioOf > 1 and (" of " .. st.prioOf) or ""), GOLD) end
+    if st.prio then add("Officer Prio pick " .. prioText(st), prioColour(st.prio)) end
     if st.has then add("Already has it  (Loot Log " .. tostring(st.has) .. ")", GREY)
     elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), GREEN)
     elseif not st.prio then add("Not on their list", GREY) end
@@ -216,10 +228,11 @@ function Loot.NeederLines(linkOrKey, n)
   if not ikey then return out end
   local pr = idx.prio[ikey]
   if pr and pr.n > 0 then
-    out[#out + 1] = { "Prio picks:", GOLD[1], GOLD[2], GOLD[3] }
+    out[#out + 1] = { "Officer Prio:", GOLD[1], GOLD[2], GOLD[3] }
     for i, key in ipairs(pr.list) do
       local c = idx.chars[key]
-      out[#out + 1] = { "  " .. i .. ". " .. (c and c.n or key), GOLD[1], GOLD[2], GOLD[3] }
+      local col = prioColour(i)
+      out[#out + 1] = { "  #" .. i .. "  " .. (c and c.n or key), col[1], col[2], col[3] }
     end
   end
   local nd = idx.need[ikey]
