@@ -171,6 +171,36 @@ SlashCmdList[key] = function(msg)
   end
 end
 
+-- Loot council modules ---------------------------------------------------------------------------
+-- <Addon>_RCLC and <Addon>_FLC are LoadOnDemand with "## LoadWith"; some clients ignore LoadWith, so we also
+-- load them ourselves the moment their council addon is loaded. Nothing is loaded for an addon that is absent.
+
+local MODULES = { RCLootCouncil = "_RCLC", ForeverLoot = "_FLC" }
+
+local function loadModuleFor(councilAddon)
+  local suffix = MODULES[councilAddon]
+  if not suffix then return end
+  local name = ADDON .. suffix
+  local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
+  local loadAddOn = (C_AddOns and C_AddOns.LoadAddOn) or _G.LoadAddOn
+  if not isLoaded or not loadAddOn then return end
+  if isLoaded(name) then return end
+  local ok, loaded, reason = pcall(loadAddOn, name)
+  if ok and loaded then
+    NS.Print("%s column loaded for %s.", suffix:sub(2), councilAddon)
+  elseif ok and reason and reason ~= "MISSING" then
+    NS.Print("could not load %s (%s). Enable it in the AddOns list.", name, tostring(reason))
+  end
+end
+
+function NS.LoadModules()
+  local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
+  if not isLoaded then return end
+  for council in pairs(MODULES) do
+    if isLoaded(council) then loadModuleFor(council) end
+  end
+end
+
 -- Events --------------------------------------------------------------------------------------
 
 local frame = CreateFrame("Frame")
@@ -181,10 +211,12 @@ frame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
     if arg1 == ADDON then
       NS.InitDB()
-      frame:UnregisterEvent("ADDON_LOADED")
+    elseif MODULES[arg1] then
+      loadModuleFor(arg1) -- a council addon loaded after us (load order, or load-on-demand)
     end
   elseif event == "PLAYER_LOGIN" then
     if not NS.db then NS.InitDB() end
+    NS.LoadModules()
     local missing = NS.ApiCheck()
     pcall(NS.RecordCharacter)
     if #missing > 0 then
