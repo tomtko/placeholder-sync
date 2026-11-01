@@ -55,6 +55,7 @@ local function fromFL(row)
   local FL = _G.ForeverLoot
   local Store = FL and FL.Sync and FL.Sync.Store
   if Store and Store.IsTestId and Store.IsTestId(row.id) then return false end
+  if row.test then return false end -- a /flc test session: never for the sheet
   local resp = type(row.responses) == "table" and row.responses[row.awardedTo] or nil
   local r = resp and resp.response
   local label = (type(r) == "table" and r.label) or (type(r) == "string" and r) or nil
