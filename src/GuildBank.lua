@@ -10,7 +10,7 @@
 local ADDON, NS = ...
 
 local MAX_SLOTS = MAX_GUILDBANK_SLOTS_PER_TAB or 98
-local TAB_TIMEOUT = 2.0        -- seconds to wait for a tab before giving up on it
+local TAB_TIMEOUT = 3.0        -- seconds to wait for a tab before giving up on it
 local SETTLE = 0.15            -- small delay so all slot data for a tab has arrived
 
 local frameOpen = false
@@ -123,7 +123,10 @@ function NS.MergeBank(cur, inc)
     local a, b = curBy[i], incBy[i]
     local aAt, bAt = has(a, cur.at), has(b, inc.at)
     local pick = a
-    if bAt and (not aAt or bAt >= aAt) then pick = b
+    -- A tab that timed out was read before the server finished answering; it only ever fills a gap,
+    -- it never replaces a tab that was read properly.
+    if bAt and b.timedOut and aAt and not a.timedOut then pick = a
+    elseif bAt and (not aAt or bAt >= aAt) then pick = b
     elseif not a then pick = b end
     if pick == a and a and b then a.name = b.name or a.name a.icon = b.icon or a.icon end
     tabs[#tabs + 1] = pick
