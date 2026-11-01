@@ -27,8 +27,11 @@ local function store()
   return NS.db.lootAwards
 end
 
+-- Plain item name: the bracket text without UI markup such as a crafting-quality icon ("|A:...|a").
 local function itemName(link)
-  return type(link) == "string" and link:match("%[(.-)%]") or nil
+  local name = type(link) == "string" and link:match("%[(.-)%]") or nil
+  if not name then return nil end
+  return (name:gsub("|A:.-|a", ""):gsub("|T.-|t", ""):gsub("%s+$", ""):gsub("^%s+", ""))
 end
 
 local function put(rec)
