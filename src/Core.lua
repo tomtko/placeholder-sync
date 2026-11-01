@@ -145,8 +145,8 @@ local function status()
   else
     local items = 0
     for _, tab in ipairs(gb.tabs or {}) do items = items + #(tab.items or {}) end
-    NS.Print("last scan %s by %s: %s, %d items in %d tabs%s. %s",
-      date("%d/%m %H:%M", gb.at), gb.by or "?", NS.FormatMoney(gb.money), items, #(gb.tabs or {}),
+    NS.Print("last scan %s by %s%s: %s, %d items in %d tabs%s. %s",
+      date("%d/%m %H:%M", gb.at), gb.by or "?", gb.sharedFrom and " (received in game)" or "", NS.FormatMoney(gb.money), items, #(gb.tabs or {}),
       gb.complete and "" or " (incomplete)",
       NS.pendingUpload and ("Uploads at your next /reload or logout (" .. SLASH .. " reload does it now).") or "Already written to disk.")
   end

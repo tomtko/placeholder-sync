@@ -208,6 +208,8 @@ local function onClosed()
   if NS.db and NS.db.guildBank then
     NS.db.guildBank.money = GetGuildBankMoney() or NS.db.guildBank.money
   end
+  -- Tell the other addon users (Sync.lua): whoever runs the bridge picks the scan up from here.
+  if NS.pendingUpload and NS.Sync and NS.Sync.Changed then NS.Sync.Changed() end
 end
 
 local GUILD_BANKER = Enum and Enum.PlayerInteractionType and Enum.PlayerInteractionType.GuildBanker

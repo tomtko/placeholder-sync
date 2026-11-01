@@ -1,35 +1,42 @@
 --[[
-  Sync.lua: shares the loot sheet dataset between addon users in game, so only one PC needs the bridge app.
+  Sync.lua: shares data between addon users in game, so only one PC needs the bridge app.
   Same approach as WowUtils: AceComm over the guild channel (and the home raid), the client's own
   C_EncodingUtil for CBOR + zlib + base64, and a queue for anything that comes up while the client restricts
   addon chat (ADDON_RESTRICTION_STATE_CHANGED, in-instance combat on the Midnight engine) or we are in combat.
 
-  Wire protocol, one message per AceComm send (prefix = addon name, first byte = protocol version):
-    1H<rev>                 "have": announced 10 s after login, every 5 minutes, and in reply to an older H
-    1R<rev>                 "request": send me anything newer than rev
-    1S<rev>                 "sending": one chunk, goes out right before a D so other holders stand down
-    1D<rev>:<gen>:<base64>  the dataset: CBOR payload, zlib, base64 (about 15 KB, roughly 60 chunks, 15-20 s)
+  Two datasets travel, each with its own version number:
+    L  the officers' loot sheet (bridge Data.lua or a shared copy), version = rev            (into the game)
+    B  the guild bank scan (<Addon>DB.guildBank), version = scan time, complete scans only   (out of the game)
+  Anyone who opens the guild bank produces a B; it spreads to every addon user, so the PC with the bridge
+  holds the newest scan from whoever opened the bank and uploads it at that officer's next /reload or logout.
+  A received scan is only kept when it is for the receiver's own guild.
 
-  Who speaks: a client that sees an H above its own rev requests; a client that gets an R below its own rev
+  Wire protocol, one message per AceComm send (prefix = addon name, first byte = protocol version):
+    2H<lootRev>,<bankAt>        "have": 10 s after login, every 5 minutes, after a change, in reply to an older H
+    2R<kind><ver>               "request": send me <kind> if yours is newer than ver
+    2S<kind><ver>               "sending": one chunk, goes out right before a D so other holders stand down
+    2D<kind><ver>:<gen>:<b64>   the data: CBOR, zlib, base64 (loot about 15 KB, bank about 8 KB)
+
+  Who speaks: a client that sees an H above its own version requests; a client that gets an R below its own
   answers after a short random delay, unless somebody else announced S or D on that channel first (AceComm only
   delivers a multipart D once its last chunk arrives, which is why S exists). "Have" replies are jittered and
-  dropped when someone else already answered, so a raid full of holders does not shout in unison. Received copies
-  go to <AddonName>DB.lootShared, so they survive logout; LootData.lua picks the newer of the bridge file and
-  the shared copy. Nothing is sent, encoded or decoded in combat.
+  dropped when someone else already answered, so a raid full of holders does not shout in unison. Nothing is
+  sent, encoded or decoded in combat.
 
-  Trust: anyone in the guild could send a crafted D on our prefix. The payload is shape-checked and only a
-  higher rev is accepted; /psync forget drops a shared copy. That is the same exposure WowUtils accepts.
+  Trust: anyone in the guild could send a crafted D on our prefix. Payloads are shape-checked, a bank scan must
+  name the receiver's guild, and only a higher version is accepted; /psync forget drops shared copies. That is
+  the same exposure WowUtils accepts.
 ]]
 local ADDON, NS = ...
 local Sync = {}
 NS.Sync = Sync
 
 local PREFIX = ADDON:sub(1, 16)
-local PROTO = "1"
+local PROTO = "2"
 local ANNOUNCE_EVERY = 300   -- seconds between "have" announcements
-local QUIET = 20             -- seconds: at most one data send / request per channel in this window
-local INBOUND_QUIET = 30     -- seconds: ignore repeated requests from the same sender
-local MAX_ENCODED = 200000   -- bytes: refuse anything bigger than this on the wire
+local QUIET = 20             -- seconds: at most one data send / request per kind and channel in this window
+local INBOUND_QUIET = 30     -- seconds: ignore repeated requests for a kind from the same sender
+local MAX_ENCODED = 250000   -- bytes: refuse anything bigger than this on the wire
 
 local Ace = LibStub and LibStub("AceComm-3.0", true)
 local EU = C_EncodingUtil
@@ -38,21 +45,24 @@ local me
 local state = {
   started = false,
   restricted = false,  -- the client currently blocks addon chat
-  queue = {},          -- [kind .. channel] = function() ... end, held back while restricted or in combat
-  lastSend = {},       -- [channel] = GetTime() of our last data send
+  queue = {},          -- [key] = function() ... end, held back while restricted or in combat
   lastHave = {},       -- [channel] = GetTime() of our last H
-  lastRequest = 0,
-  seenData = {},       -- [channel] = { rev, at }: the newest S/D anyone broadcast there
-  seenHave = {},       -- [channel] = { rev, at }: the newest H anyone broadcast there
-  pendingSend = {},    -- [channel] = timer
+  seenHave = {},       -- [channel] = { at, L, B }: the newest H anyone broadcast there
   pendingHave = {},    -- [channel] = timer
-  pendingRequest = nil,
-  inbound = {},        -- [sender] = GetTime() of their last R
-  stash = nil,         -- a D that arrived in combat, applied on PLAYER_REGEN_ENABLED
-  encodedRev = nil, encoded = nil,
-  lastShared = nil,    -- { to, rev, at } for /psync
   received = 0, sent = 0,
 }
+
+-- Per-kind state: [kind] = { lastSend = {ch=t}, seenData = {ch={ver,at}}, pendingSend = {ch=timer},
+--   pendingRequest = timer, lastRequest = t, inbound = {sender=t}, stash = {...}, encodedVer, encoded, lastShared }
+local K = {}
+local function kstate(kind)
+  local s = K[kind]
+  if not s then
+    s = { lastSend = {}, seenData = {}, pendingSend = {}, inbound = {}, lastRequest = 0 }
+    K[kind] = s
+  end
+  return s
+end
 
 -- Helpers ---------------------------------------------------------------------------------------
 
@@ -82,20 +92,94 @@ local function channels()
   return t
 end
 
-local function current() return NS.Loot and NS.Loot.Current() or nil end
-local function myRev() local c = current() return c and c.rev or 0 end
+local function countKeys(t) local n = 0 for _ in pairs(t or {}) do n = n + 1 end return n end
+
+-- Datasets --------------------------------------------------------------------------------------
+
+local SETS = {}
+
+SETS.L = {
+  name = "loot sheet",
+  version = function()
+    local c = NS.Loot and NS.Loot.Current()
+    return c and c.rev or 0
+  end,
+  -- payload, generatedAt
+  current = function()
+    local c = NS.Loot and NS.Loot.Current()
+    if not c then return nil end
+    return c.payload, tonumber(c.generatedAt) or 0
+  end,
+  plausible = function(p)
+    if type(p) ~= "table" or type(p.items) ~= "table" or type(p.chars) ~= "table" then return false end
+    for _, k in ipairs({ "names", "needers", "prio", "owned" }) do
+      if p[k] ~= nil and type(p[k]) ~= "table" then return false end
+    end
+    return countKeys(p.items) <= 5000 and countKeys(p.chars) <= 5000
+  end,
+  apply = function(ver, gen, p, sender)
+    NS.db.lootShared = { rev = ver, generatedAt = gen, receivedAt = time(), from = sender, payload = p }
+    if NS.Loot then NS.Loot.Reset() end
+    NS.Print("loot sheet rev %d received from %s (%d items). It shows in the council window right away.", ver, short(sender), countKeys(p.items))
+  end,
+  forget = function()
+    if NS.db then NS.db.lootShared = nil end
+    if NS.Loot then NS.Loot.Reset() end
+  end,
+}
+
+SETS.B = {
+  name = "guild bank",
+  version = function()
+    local gb = NS.db and NS.db.guildBank
+    if not gb or gb.complete == false or type(gb.at) ~= "number" then return 0 end
+    return gb.at
+  end,
+  current = function()
+    local gb = NS.db and NS.db.guildBank
+    if not gb then return nil end
+    return gb, 0
+  end,
+  plausible = function(gb)
+    if type(gb) ~= "table" or type(gb.at) ~= "number" or type(gb.tabs) ~= "table" or type(gb.guild) ~= "string" then return false end
+    if gb.complete ~= true then return false end
+    local mine = GetGuildInfo("player")
+    if not mine or mine ~= gb.guild then return false end -- someone else's guild, or we are not in one
+    local items = 0
+    for _, t in pairs(gb.tabs) do
+      if type(t) ~= "table" then return false end
+      items = items + countKeys(t.items)
+    end
+    return items <= 3000
+  end,
+  apply = function(ver, _, gb, sender)
+    gb.sharedFrom = sender
+    gb.receivedAt = time()
+    NS.db.guildBank = gb
+    NS.pendingUpload = true -- the bridge gets it at this PC's next /reload or logout
+  end,
+  forget = function()
+    local gb = NS.db and NS.db.guildBank
+    if gb and gb.sharedFrom then NS.db.guildBank = nil end
+  end,
+}
 
 -- Encoding --------------------------------------------------------------------------------------
 
-local function encodedData(cur)
-  if state.encodedRev == cur.rev and state.encoded then return state.encoded end
-  local ok, cbor = pcall(EU.SerializeCBOR, cur.payload)
+local function encodedData(kind)
+  local ks = kstate(kind)
+  local set = SETS[kind]
+  local ver = set.version()
+  if ks.encodedVer == ver and ks.encoded then return ks.encoded end
+  local payload = set.current()
+  if not payload then return nil, "nothing to send" end
+  local ok, cbor = pcall(EU.SerializeCBOR, payload)
   if not ok or type(cbor) ~= "string" then return nil, "serialise: " .. tostring(cbor) end
   local ok2, z = pcall(EU.CompressString, cbor, Enum.CompressionMethod.Zlib, Enum.CompressionLevel and Enum.CompressionLevel.OptimizeForSize or nil)
   if not ok2 or type(z) ~= "string" then return nil, "compress: " .. tostring(z) end
   local ok3, b64 = pcall(EU.EncodeBase64, z)
   if not ok3 or type(b64) ~= "string" then return nil, "encode: " .. tostring(b64) end
-  state.encodedRev, state.encoded = cur.rev, b64
+  ks.encodedVer, ks.encoded = ver, b64
   return b64
 end
 
@@ -107,18 +191,6 @@ local function decode(b64)
   local ok3, p = pcall(EU.DeserializeCBOR, cbor)
   if not ok3 then return nil end
   return p
-end
-
-local function plausible(p)
-  if type(p) ~= "table" or type(p.items) ~= "table" or type(p.chars) ~= "table" then return false end
-  for _, k in ipairs({ "names", "needers", "prio", "owned" }) do
-    if p[k] ~= nil and type(p[k]) ~= "table" then return false end
-  end
-  local n = 0
-  for _ in pairs(p.items) do n = n + 1 if n > 5000 then return false end end
-  n = 0
-  for _ in pairs(p.chars) do n = n + 1 if n > 5000 then return false end end
-  return true
 end
 
 -- Sending ---------------------------------------------------------------------------------------
@@ -134,6 +206,10 @@ local function flush()
   for _, fn in pairs(q) do fn() end
 end
 
+local function haveText()
+  return PROTO .. "H" .. SETS.L.version() .. "," .. SETS.B.version()
+end
+
 local function sendHave(ch)
   state.pendingHave[ch] = nil
   if not channelOpen(ch) then return end
@@ -141,7 +217,7 @@ local function sendHave(ch)
   local now = GetTime()
   if (state.lastHave[ch] or 0) > now - QUIET then return end
   state.lastHave[ch] = now
-  Ace:SendCommMessage(PREFIX, PROTO .. "H" .. myRev(), ch, nil, "NORMAL")
+  Ace:SendCommMessage(PREFIX, haveText(), ch, nil, "NORMAL")
 end
 
 --- Reply to someone behind us, unless another holder already did.
@@ -150,111 +226,131 @@ local function scheduleHave(ch)
   state.pendingHave[ch] = C_Timer.NewTimer(0.3 + math.random() * 1.5, function()
     state.pendingHave[ch] = nil
     local sh = state.seenHave[ch]
-    if sh and sh.rev >= myRev() and sh.at > GetTime() - 5 then return end
+    if sh and sh.at > GetTime() - 5 and sh.L >= SETS.L.version() and sh.B >= SETS.B.version() then return end
     sendHave(ch)
   end)
 end
 
-local function sendRequest(ch)
-  state.pendingRequest = nil
+local function sendRequest(kind, ch)
+  local ks = kstate(kind)
+  ks.pendingRequest = nil
   if not channelOpen(ch) then return end
-  if not canSendNow() then later("R" .. ch, function() sendRequest(ch) end) return end
-  state.lastRequest = GetTime()
-  Ace:SendCommMessage(PREFIX, PROTO .. "R" .. myRev(), ch, nil, "NORMAL")
+  if not canSendNow() then later("R" .. kind .. ch, function() sendRequest(kind, ch) end) return end
+  ks.lastRequest = GetTime()
+  Ace:SendCommMessage(PREFIX, PROTO .. "R" .. kind .. SETS[kind].version(), ch, nil, "NORMAL")
 end
 
-local function sendData(ch, to)
-  state.pendingSend[ch] = nil
+local function sendData(kind, ch, to)
+  local ks = kstate(kind)
+  ks.pendingSend[ch] = nil
   if not channelOpen(ch) then return end
-  if not canSendNow() then later("D" .. ch, function() sendData(ch, to) end) return end
+  if not canSendNow() then later("D" .. kind .. ch, function() sendData(kind, ch, to) end) return end
   local now = GetTime()
-  if (state.lastSend[ch] or 0) > now - QUIET then return end
-  local cur = current()
-  if not cur then return end
-  local sd = state.seenData[ch]
-  if sd and sd.rev >= cur.rev and sd.at > now - QUIET then return end -- somebody else already answered
-  local b64, err = encodedData(cur)
-  if not b64 then NS.Print("could not share the loot sheet (%s).", err) return end
-  state.lastSend[ch] = now
+  if (ks.lastSend[ch] or 0) > now - QUIET then return end
+  local ver = SETS[kind].version()
+  if ver == 0 then return end
+  local sd = ks.seenData[ch]
+  if sd and sd.ver >= ver and sd.at > now - QUIET then return end -- somebody else already answered
+  local b64, err = encodedData(kind)
+  if not b64 then NS.Print("could not share the %s (%s).", SETS[kind].name, err) return end
+  local _, gen = SETS[kind].current()
+  ks.lastSend[ch] = now
   state.sent = state.sent + 1
-  state.lastShared = { to = to, rev = cur.rev, at = time() }
-  local gen = string.format("%.0f", tonumber(cur.generatedAt) or 0)
-  Ace:SendCommMessage(PREFIX, PROTO .. "S" .. cur.rev, ch, nil, "ALERT")
-  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. cur.rev .. ":" .. gen .. ":" .. b64, ch, nil, "BULK")
+  ks.lastShared = { to = to, ver = ver, at = time() }
+  Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, ch, nil, "ALERT")
+  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, ch, nil, "BULK")
 end
 
-local function scheduleRequest(ch, rev)
-  if state.pendingRequest then return end
+local function scheduleRequest(kind, ch, theirVer)
+  local ks = kstate(kind)
+  if ks.pendingRequest then return end
   local now = GetTime()
-  if state.lastRequest > now - QUIET then return end
-  local sd = state.seenData[ch]
-  if sd and sd.rev >= rev and sd.at > now - QUIET then return end -- data is already on its way
-  state.pendingRequest = C_Timer.NewTimer(0.5 + math.random() * 2, function() sendRequest(ch) end)
+  if ks.lastRequest > now - QUIET then return end
+  local sd = ks.seenData[ch]
+  if sd and sd.ver >= theirVer and sd.at > now - QUIET then return end -- data is already on its way
+  ks.pendingRequest = C_Timer.NewTimer(0.5 + math.random() * 2, function() sendRequest(kind, ch) end)
 end
 
-local function scheduleSend(ch, to)
-  if state.pendingSend[ch] then return end
-  state.pendingSend[ch] = C_Timer.NewTimer(0.5 + math.random() * 3.5, function() sendData(ch, to) end)
+local function scheduleSend(kind, ch, to)
+  local ks = kstate(kind)
+  if ks.pendingSend[ch] then return end
+  ks.pendingSend[ch] = C_Timer.NewTimer(0.5 + math.random() * 3.5, function() sendData(kind, ch, to) end)
 end
 
-local function cancelSend(ch)
-  local t = state.pendingSend[ch]
-  if t then t:Cancel() state.pendingSend[ch] = nil end
-  state.queue["D" .. ch] = nil
+local function cancelSend(kind, ch)
+  local ks = kstate(kind)
+  local t = ks.pendingSend[ch]
+  if t then t:Cancel() ks.pendingSend[ch] = nil end
+  state.queue["D" .. kind .. ch] = nil
+end
+
+local function cancelRequest(kind)
+  local ks = kstate(kind)
+  if ks.pendingRequest then ks.pendingRequest:Cancel() ks.pendingRequest = nil end
 end
 
 -- Receiving -------------------------------------------------------------------------------------
 
-local function apply(rev, gen, b64, sender)
+local function apply(kind, ver, gen, b64, sender)
+  local set = SETS[kind]
   local p = decode(b64)
-  if not p or not plausible(p) then return end
-  if myRev() >= rev then return end
-  NS.db.lootShared = { rev = rev, generatedAt = gen, receivedAt = time(), from = sender, payload = p }
-  state.encodedRev, state.encoded = rev, b64 -- we can pass it on as is
+  if not p or not set.plausible(p) then return end
+  if set.version() >= ver then return end
+  set.apply(ver, gen, p, sender)
+  local ks = kstate(kind)
+  ks.encodedVer, ks.encoded = ver, b64 -- we can pass it on as is
   state.received = state.received + 1
-  if NS.Loot then NS.Loot.Reset() end
-  local n = 0
-  for _ in pairs(p.items) do n = n + 1 end
-  NS.Print("loot sheet rev %d received from %s (%d items). It shows in the council window right away.", rev, short(sender), n)
 end
 
 local function onComm(_, msg, channel, sender)
   if type(msg) ~= "string" or msg:sub(1, 1) ~= PROTO then return end
   if channel ~= "GUILD" and channel ~= "RAID" then return end
   if isMe(sender) then return end
-  local kind = msg:sub(2, 2)
-  local mine = myRev()
-  if kind == "H" then
-    local rev = tonumber(msg:sub(3))
-    if not rev then return end
-    state.seenHave[channel] = { rev = rev, at = GetTime() }
-    if rev > mine then scheduleRequest(channel, rev)
-    elseif rev < mine then scheduleHave(channel) end -- they are behind: tell them, they will ask
-  elseif kind == "S" then
-    local rev = tonumber(msg:sub(3))
-    if not rev then return end
-    state.seenData[channel] = { rev = rev, at = GetTime() }
-    if rev >= mine then cancelSend(channel) end
-    if rev > mine and state.pendingRequest then state.pendingRequest:Cancel() state.pendingRequest = nil end
-  elseif kind == "R" then
-    local rev = tonumber(msg:sub(3))
-    if not rev then return end
+  local op = msg:sub(2, 2)
+  if op == "H" then
+    local l, b = msg:match("^.H(%d+),(%d+)$")
+    l, b = tonumber(l), tonumber(b)
+    if not l or not b then return end
+    state.seenHave[channel] = { at = GetTime(), L = l, B = b }
+    local theirs, behind = { L = l, B = b }, false
+    for kind, set in pairs(SETS) do
+      local mine = set.version()
+      if theirs[kind] > mine then scheduleRequest(kind, channel, theirs[kind])
+      elseif theirs[kind] < mine then behind = true end
+    end
+    if behind then scheduleHave(channel) end -- they are behind: tell them, they will ask
+    return
+  end
+  local kind = msg:sub(3, 3)
+  local set = SETS[kind]
+  if not set then return end
+  local ks = kstate(kind)
+  local mine = set.version()
+  if op == "R" then
+    local ver = tonumber(msg:sub(4))
+    if not ver then return end
     local now = GetTime()
-    if (state.inbound[sender] or 0) > now - INBOUND_QUIET then return end
-    state.inbound[sender] = now
-    if mine > rev then scheduleSend(channel, sender) end
-  elseif kind == "D" then
-    local rev, gen, b64 = msg:match("^.D(%d+):(%d+):(.*)$")
-    rev = tonumber(rev)
-    if not rev or not b64 or #b64 == 0 or #b64 > MAX_ENCODED then return end
-    state.seenData[channel] = { rev = rev, at = GetTime() }
-    if rev >= mine then cancelSend(channel) end
-    if rev <= mine then return end
+    if (ks.inbound[sender] or 0) > now - INBOUND_QUIET then return end
+    ks.inbound[sender] = now
+    if mine > ver then scheduleSend(kind, channel, sender) end
+  elseif op == "S" then
+    local ver = tonumber(msg:sub(4))
+    if not ver then return end
+    ks.seenData[channel] = { ver = ver, at = GetTime() }
+    if ver >= mine then cancelSend(kind, channel) end
+    if ver > mine then cancelRequest(kind) end
+  elseif op == "D" then
+    local ver, gen, b64 = msg:match("^..(%d+):(%d+):(.*)$", 3)
+    ver = tonumber(ver)
+    if not ver or not b64 or #b64 == 0 or #b64 > MAX_ENCODED then return end
+    ks.seenData[channel] = { ver = ver, at = GetTime() }
+    if ver >= mine then cancelSend(kind, channel) end
+    if ver <= mine then return end
     if InCombatLockdown() then
-      if not state.stash or state.stash.rev < rev then state.stash = { rev = rev, gen = tonumber(gen), b64 = b64, sender = sender } end
+      if not ks.stash or ks.stash.ver < ver then ks.stash = { ver = ver, gen = tonumber(gen), b64 = b64, sender = sender } end
       return
     end
-    apply(rev, tonumber(gen), b64, sender)
+    apply(kind, ver, tonumber(gen), b64, sender)
   end
 end
 
@@ -273,28 +369,43 @@ function Sync.Announce()
   for _, ch in ipairs(channels()) do sendHave(ch) end
 end
 
+--- Something we hold changed (bank closed after a scan, loot file reloaded): announce it right away.
+function Sync.Changed()
+  if not state.started then return end
+  wipe(state.lastHave)
+  C_Timer.After(1, Sync.Announce)
+end
+
 --- /psync sync: ask right now, ignoring the quiet period.
 function Sync.RequestNow()
   if not state.started then NS.Print("sharing is off: %s.", select(2, Sync.Available()) or "not started") return end
-  state.lastRequest = 0
   local chs = channels()
   if #chs == 0 then NS.Print("not in a guild or raid, nobody to ask.") return end
-  for _, ch in ipairs(chs) do sendRequest(ch) end
-  NS.Print("asked %s for loot sheet data newer than rev %d.", table.concat(chs, " and "):lower(), myRev())
+  for kind in pairs(SETS) do
+    kstate(kind).lastRequest = 0
+    for _, ch in ipairs(chs) do sendRequest(kind, ch) end
+  end
+  NS.Print("asked %s for loot sheet data newer than rev %d and bank scans newer than %s.",
+    table.concat(chs, " and "):lower(), SETS.L.version(), SETS.B.version() > 0 and date("%d/%m %H:%M", SETS.B.version()) or "none")
 end
 
---- /psync forget: drop a shared copy (the bridge file, if any, stays).
+--- /psync forget: drop shared copies (the bridge file and your own scans stay).
 function Sync.Forget()
-  if NS.db then NS.db.lootShared = nil end
-  state.encodedRev, state.encoded = nil, nil
-  if NS.Loot then NS.Loot.Reset() end
-  NS.Print("shared loot sheet copy dropped.")
+  for _, set in pairs(SETS) do set.forget() end
+  for _, ks in pairs(K) do ks.encodedVer, ks.encoded = nil, nil end
+  NS.Print("shared copies dropped.")
 end
 
 function Sync.Status()
   if not state.started then return "sharing off (" .. (select(2, Sync.Available()) or "not started") .. ")" end
-  local parts = { ("sharing on as %s"):format(table.concat(channels(), "+") ~= "" and table.concat(channels(), "+"):lower() or "nobody (no guild/raid)") }
-  if state.lastShared then parts[#parts + 1] = ("last sent rev %d to %s %ds ago"):format(state.lastShared.rev, short(state.lastShared.to), time() - state.lastShared.at) end
+  local chs = table.concat(channels(), "+"):lower()
+  local parts = { ("sharing on in %s"):format(chs ~= "" and chs or "no channel (no guild or raid)") }
+  for kind, set in pairs(SETS) do
+    local ls = K[kind] and K[kind].lastShared
+    if ls then parts[#parts + 1] = ("%s last sent to %s %ds ago"):format(set.name, short(ls.to), time() - ls.at) end
+  end
+  local gb = NS.db and NS.db.guildBank
+  if gb and gb.sharedFrom then parts[#parts + 1] = ("bank scan here is %s's, received %s"):format(short(gb.sharedFrom), date("%d/%m %H:%M", gb.receivedAt or 0)) end
   parts[#parts + 1] = ("%d received, %d sent this session"):format(state.received, state.sent)
   if state.restricted then parts[#parts + 1] = "addon chat restricted right now" end
   if next(state.queue) then parts[#parts + 1] = "messages waiting" end
@@ -304,7 +415,7 @@ end
 function Sync.Start()
   if state.started then return end
   local ok, why = Sync.Available()
-  if not ok then NS.Print("in-game sharing of the loot sheet is off: %s.", why) return end
+  if not ok then NS.Print("in-game sharing is off: %s.", why) return end
   state.started = true
   me = NS.PlayerKey()
   Ace:RegisterComm(PREFIX, onComm)
@@ -315,9 +426,11 @@ function Sync.Start()
   pcall(f.RegisterEvent, f, "ADDON_RESTRICTION_STATE_CHANGED")
   f:SetScript("OnEvent", function(_, event, a1, a2)
     if event == "PLAYER_REGEN_ENABLED" then
-      local s = state.stash
-      state.stash = nil
-      if s and s.rev > myRev() then apply(s.rev, s.gen, s.b64, s.sender) end
+      for kind, ks in pairs(K) do
+        local s = ks.stash
+        ks.stash = nil
+        if s and s.ver > SETS[kind].version() then apply(kind, s.ver, s.gen, s.b64, s.sender) end
+      end
       flush()
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" then
       if Enum.AddOnRestrictionType and a1 ~= Enum.AddOnRestrictionType.Chat then return end
