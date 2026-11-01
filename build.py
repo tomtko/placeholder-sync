@@ -8,6 +8,7 @@
 
 The source in addon/src is brand-neutral except for the .toc and the slash constant in Core.lua; this
 script rewrites those from brand.json, so renaming the guild is: edit brand.json, run this again.
+The addon has its own version (brand.json addonVersion); the desktop app uses appVersion.
 """
 import argparse, json, os, re, shutil, sys, zipfile
 from pathlib import Path
@@ -20,7 +21,7 @@ WOW_DEFAULT = Path("/mnt/c/Program Files (x86)/World of Warcraft")
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--version", help="override brand.json version")
+    ap.add_argument("--version", help="override brand.json addonVersion")
     ap.add_argument("--install", action="store_true", help="copy into the WoW AddOns folder after building")
     ap.add_argument("--flavor", default="_retail_", help="client folder to install into (default _retail_)")
     ap.add_argument("--wow", default=str(WOW_DEFAULT), help="World of Warcraft install root")
@@ -28,7 +29,7 @@ def main() -> int:
 
     brand = json.loads((ROOT / "brand.json").read_text())
     addon, slash = brand["addon"], brand["slash"]
-    version = args.version or brand.get("version", "0.1.0")
+    version = args.version or brand.get("addonVersion") or brand.get("version", "0.1.0")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", addon):
         sys.exit(f"brand.addon must be a plain identifier (folder + SavedVariables name): {addon!r}")
 
