@@ -61,7 +61,7 @@ local function setup()
       local col = table.cols[sortbycol]
       if col.sort == "dsc" then return a > b else return a < b end
     end,
-  }, "response", "after")
+  }, "roll", "after") -- last column, after Roll (where WowUtils puts its own)
   if not ok then
     PS.Print("RCLootCouncil column could not be added: %s", tostring(err))
     return true
