@@ -22,15 +22,16 @@ NS.Loot = Loot
 
 local GOLD = { 1, 0.82, 0 }
 local GREEN = { 0.25, 1, 0.25 }
--- The Loot tab has six Prio columns; each rank gets its own colour so the column reads at a glance.
+-- The Loot tab has six Prio columns. One ordered scale, green (#1) through yellow and orange to red (#6),
+-- so the rank reads at a glance without having to remember what a colour means.
 local PRIO_SLOTS = 6
 local PRIO_COLOURS = {
-  [1] = { 1, 0.82, 0 },        -- gold
-  [2] = { 0.85, 0.88, 0.95 },  -- silver
-  [3] = { 0.85, 0.55, 0.25 },  -- bronze
-  [4] = { 0.55, 0.8, 1 },      -- light blue
-  [5] = { 0.65, 0.65, 0.7 },   -- grey
-  [6] = { 0.5, 0.5, 0.55 },    -- dim grey
+  [1] = { 0.30, 1.00, 0.30 },  -- green
+  [2] = { 0.65, 1.00, 0.30 },  -- lime
+  [3] = { 1.00, 0.90, 0.20 },  -- yellow
+  [4] = { 1.00, 0.65, 0.20 },  -- orange
+  [5] = { 1.00, 0.45, 0.20 },  -- orange-red
+  [6] = { 1.00, 0.30, 0.30 },  -- red
 }
 local function prioColour(rank) return PRIO_COLOURS[rank] or PRIO_COLOURS[6] end
 local function prioText(st) return "#" .. st.prio .. "/" .. math.max(PRIO_SLOTS, st.prioOf or 0) end
@@ -168,7 +169,7 @@ function Loot.CellText(st)
   if not st.char then return "?", unpack(DIM) end
   if st.prio then return prioText(st), unpack(prioColour(st.prio)) end
   if st.has then return "has", unpack(GREY) end
-  if st.need then return "Wants", unpack(GREEN) end
+  if st.need then return "Wants", unpack(WHITE) end
   return "\226\128\148", unpack(DIM) -- em dash: not on their list
 end
 
@@ -212,7 +213,7 @@ function Loot.TooltipLines(st, name)
     add(" ", WHITE)
     if st.prio then add("Officer Prio pick " .. prioText(st), prioColour(st.prio)) end
     if st.has then add("Already has it  (Loot Log " .. tostring(st.has) .. ")", GREY)
-    elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), GREEN)
+    elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), WHITE)
     elseif not st.prio then add("Not on their list", GREY) end
     if c.of and c.of > 0 then add("BiS progress " .. (c.bis or 0) .. " / " .. c.of, GREY) end
   end
