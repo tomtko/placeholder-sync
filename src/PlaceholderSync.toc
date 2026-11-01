@@ -5,7 +5,10 @@
 ## Version: 0.1.0
 ## SavedVariables: PlaceholderSyncDB
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10_Blue
+## AllowLoadGameType: standard, camelot
 ## X-Website: https://github.com/tomtko
 
 Core.lua
 GuildBank.lua
+Data.lua
+LootData.lua

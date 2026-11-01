@@ -55,21 +55,51 @@ def main() -> int:
     toc = re.sub(r"^## SavedVariables:.*$", f"## SavedVariables: {addon}DB", toc, flags=re.M)
     (stage / f"{addon}.toc").write_text(toc, encoding="utf-8")
 
+    # Load-on-demand modules: <Addon>_RCLC and <Addon>_FLC, each loaded by the client only with its council addon.
+    modules = {}
+    for mod_dir in sorted((ROOT / "addon" / "modules").iterdir()):
+        if not mod_dir.is_dir():
+            continue
+        suffix = mod_dir.name  # RCLC / FLC
+        mod_name = f"{addon}_{suffix}"
+        mod_stage = DIST / mod_name
+        if mod_stage.exists():
+            shutil.rmtree(mod_stage)
+        mod_stage.mkdir(parents=True)
+        for f in sorted(mod_dir.iterdir()):
+            text = f.read_text(encoding="utf-8")
+            if f.suffix == ".toc":
+                text = re.sub(r"^## Title:.*$", f"## Title: {addon}: " + {"RCLC": "RCLootCouncil", "FLC": "ForeverLoot"}.get(suffix, suffix) + " column", text, flags=re.M)
+                text = re.sub(r"^## Version:.*$", f"## Version: {version}", text, flags=re.M)
+                text = re.sub(r"^(## Dependencies: )\w+", rf"\g<1>{addon}", text, flags=re.M)
+                out_name = f"{mod_name}.toc"
+            else:
+                out_name = f.name
+            (mod_stage / out_name).write_text(text, encoding="utf-8")
+        modules[mod_name] = mod_stage
+
     zip_path = DIST / f"{addon}-{version}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(stage.rglob("*")):
-            if f.is_file():
-                z.write(f, f"Interface/AddOns/{addon}/{f.relative_to(stage)}")
-    print(f"built {zip_path.relative_to(ROOT)}  ({addon} v{version}, /{slash})")
+        for folder, src in [(addon, stage), *modules.items()]:
+            for f in sorted(src.rglob("*")):
+                if f.is_file():
+                    z.write(f, f"Interface/AddOns/{folder}/{f.relative_to(src)}")
+    print(f"built {zip_path.relative_to(ROOT)}  ({addon} v{version}, /{slash}, modules: {', '.join(modules) or 'none'})")
 
     if args.install:
-        target = Path(args.wow) / args.flavor / "Interface" / "AddOns" / addon
-        if not target.parent.is_dir():
-            sys.exit(f"AddOns folder not found: {target.parent}")
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(stage, target)
-        print(f"installed to {target}")
+        addons_dir = Path(args.wow) / args.flavor / "Interface" / "AddOns"
+        if not addons_dir.is_dir():
+            sys.exit(f"AddOns folder not found: {addons_dir}")
+        for folder, src in [(addon, stage), *modules.items()]:
+            target = addons_dir / folder
+            keep_data = target / "Data.lua"
+            data_backup = keep_data.read_text(encoding="utf-8") if folder == addon and keep_data.exists() else None
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(src, target)
+            if data_backup is not None and "_Data = {" in data_backup:
+                (target / "Data.lua").write_text(data_backup, encoding="utf-8")  # keep what the bridge wrote
+        print(f"installed {addon} + {len(modules)} module(s) to {addons_dir}")
         sv = Path(args.wow) / args.flavor / "WTF" / "Account"
         print(f"SavedVariables will appear under {sv}/<account>/SavedVariables/{addon}.lua after a /reload")
     return 0

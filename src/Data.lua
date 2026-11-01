@@ -1,0 +1,3 @@
+-- Written by the bridge app (Placeholder Bridge) from the officers' loot sheet. Do not edit: it is replaced
+-- whenever the sheet changes, and the game only reads it at login or /reload.
+-- When present it defines <AddonName>_Data = { rev = n, writtenAt = unix, payload = { ... } }.

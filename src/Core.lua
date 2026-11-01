@@ -18,6 +18,8 @@ local SLASH = "/psync" -- @brand:slash
 NS.ADDON = ADDON
 NS.DB_NAME = ADDON .. "DB"
 NS.DB_VERSION = 1
+-- The load-on-demand modules (<Addon>_RCLC, <Addon>_FLC) reach us through this global.
+_G[ADDON] = NS
 
 local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or _G.GetAddOnMetadata
 NS.VERSION = (getMeta and getMeta(ADDON, "Version")) or "dev"
@@ -143,6 +145,9 @@ local function status()
       gb.complete and "" or " (incomplete)",
       NS.pendingUpload and ("Uploads at your next /reload or logout (" .. SLASH .. " reload does it now).") or "Already written to disk.")
   end
+  local info = NS.Loot and NS.Loot.Info()
+  if info then NS.Print("loot sheet data: rev %s, %d items, written %s.", tostring(info.rev), info.items, date("%d/%m %H:%M", info.writtenAt or 0))
+  else NS.Print("no loot sheet data yet (the bridge writes Data.lua; it lands at the next /reload).") end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
 end

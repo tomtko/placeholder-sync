@@ -1,0 +1,11 @@
+## Interface: 120105, 16001
+## Title: PlaceholderSync: ForeverLoot column
+## Notes: Adds a "Sheet" column to ForeverLoot's award window with each candidate's standing on the officer loot sheet.
+## Author: tomtko
+## Version: 0.1.0
+## LoadOnDemand: 1
+## LoadWith: ForeverLoot
+## Dependencies: PlaceholderSync, ForeverLoot
+## AllowLoadGameType: standard, camelot
+
+FLC.lua
