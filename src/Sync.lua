@@ -462,7 +462,7 @@ local function onComm(_, msg, channel, sender)
     if ver >= mine then cancelSend(kind, channel) end
     if ver > mine then cancelRequest(kind) end
   elseif op == "D" then
-    local ver, gen, b64 = msg:match("^..(%d+):(%d+):(.*)$", 3)
+    local ver, gen, b64 = msg:match("^(%d+):(%d+):(.*)$", 4) -- after "2D<kind>"
     ver = tonumber(ver)
     if not ver or not b64 or #b64 == 0 or #b64 > MAX_ENCODED then return end
     ks.seenData[channel] = { ver = ver, at = GetTime() }

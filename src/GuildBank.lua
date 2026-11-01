@@ -41,10 +41,17 @@ local function parseLink(link)
   return id, name, tier
 end
 
+-- Returns the items, plus how many occupied slots had no item link yet (the client has not cached that
+-- item: the link arrives a moment later, so the caller re-reads).
 local function readTab(tab)
   local items = {}
+  local unlinked = 0
   for slot = 1, MAX_SLOTS do
     local ok, link = pcall(GetGuildBankItemLink, tab, slot)
+    if ok and not link then
+      local ok2, texture = pcall(GetGuildBankItemInfo, tab, slot)
+      if ok2 and texture then unlinked = unlinked + 1 end
+    end
     if ok and link then
       local _, texture, count, _, _, quality = pcall(GetGuildBankItemInfo, tab, slot)
       local id, name, tier = parseLink(link)
@@ -60,7 +67,19 @@ local function readTab(tab)
       }
     end
   end
-  return items
+  return items, unlinked
+end
+
+local READ_RETRIES, READ_RETRY_DELAY = 6, 0.5
+
+-- Read a tab, re-reading while some occupied slots still lack item links. done(items, partial).
+local function readTabSettled(tab, done, attempt)
+  local items, unlinked = readTab(tab)
+  if unlinked > 0 and (attempt or 1) < READ_RETRIES then
+    C_Timer.After(READ_RETRY_DELAY, function() readTabSettled(tab, done, (attempt or 1) + 1) end)
+    return
+  end
+  done(items, unlinked > 0)
 end
 
 local function countItems(tabs)
@@ -100,7 +119,7 @@ local function finishScan(complete)
   local hidden = 0
   for _, t in ipairs(tabs) do if not t.viewable then hidden = hidden + 1 end end
   local note = ""
-  if not gb.complete then note = " (some tabs did not answer)" end
+  if not gb.complete then note = " (some items were still loading, open the bank again in a moment)" end
   if hidden > 0 then note = note .. (" (%d tab%s you cannot view, kept from earlier scans)"):format(hidden, hidden == 1 and "" or "s") end
   NS.Print("bank saved: %s, %d items in %d tabs%s. It uploads at your next /reload or logout.",
     NS.FormatMoney(gb.money), countItems(gb.tabs), #gb.tabs, note)
@@ -123,14 +142,13 @@ function NS.MergeBank(cur, inc)
     local a, b = curBy[i], incBy[i]
     local aAt, bAt = has(a, cur.at), has(b, inc.at)
     local pick = a
-    -- A tab that timed out was read before the server finished answering; it only ever fills a gap,
-    -- it never replaces a tab that was read properly.
-    if bAt and b.timedOut and aAt and not a.timedOut then pick = a
+    -- A partial read (item links still missing) only ever fills a gap; it never replaces a full read.
+    if bAt and b.partial and aAt and not a.partial then pick = a
     elseif bAt and (not aAt or bAt >= aAt) then pick = b
     elseif not a then pick = b end
     if pick == a and a and b then a.name = b.name or a.name a.icon = b.icon or a.icon end
     tabs[#tabs + 1] = pick
-    if not (pick and pick.viewable and not pick.missing and not pick.timedOut) then complete = false end
+    if not (pick and pick.viewable and not pick.missing and not pick.partial) then complete = false end
     local pickAt = pick and has(pick, pick == b and inc.at or cur.at)
     if pickAt and pickAt > newestAt then newestAt, newestBy = pickAt, pick.by or (pick == b and inc.by or cur.by) end
   end
@@ -155,8 +173,12 @@ local function tabAnswered()
   -- Give the remaining slot updates a moment to land, then read the whole tab.
   C_Timer.After(SETTLE, function()
     if not scan or scan.pos ~= pos then return end
-    scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index), at = time(), by = NS.PlayerKey() }
-    nextTab()
+    readTabSettled(t.index, function(items, partial)
+      if not scan or scan.pos ~= pos then return end
+      if partial then scan.complete = false end
+      scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = items, partial = partial or nil, at = time(), by = NS.PlayerKey() }
+      nextTab()
+    end)
   end)
 end
 
@@ -183,10 +205,16 @@ nextTab = function()
   end
   scan.timer = C_Timer.NewTimer(TAB_TIMEOUT, function()
     if scan and scan.waiting == t.index then
-      scan.complete = false
+      -- No event: the client usually already had this tab from an earlier open. The read below is as good
+      -- as any; it only counts as partial when item links are still missing.
       scan.waiting = nil
-      scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index), timedOut = true, at = time(), by = NS.PlayerKey() }
-      nextTab()
+      local pos = scan.pos
+      readTabSettled(t.index, function(items, partial)
+        if not scan or scan.pos ~= pos then return end
+        if partial then scan.complete = false end
+        scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = items, partial = partial or nil, timedOut = true, at = time(), by = NS.PlayerKey() }
+        nextTab()
+      end)
     end
   end)
 end
@@ -224,12 +252,16 @@ local function viewedTabChanged()
   if not ok or not cur or cur < 1 then return end
   for _, t in ipairs(gb.tabs) do
     if t.index == cur then
-      t.items = readTab(cur)
-      t.viewable = true
-      t.missing = nil
-      t.timedOut = nil
-      t.at = time()
-      t.by = NS.PlayerKey()
+      local items, unlinked = readTab(cur)
+      if unlinked == 0 then
+        t.items = items
+        t.viewable = true
+        t.missing = nil
+        t.timedOut = nil
+        t.partial = nil
+        t.at = time()
+        t.by = NS.PlayerKey()
+      end
       break
     end
   end
