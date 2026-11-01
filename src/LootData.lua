@@ -156,18 +156,16 @@ function Loot.CellText(st)
   if not st.char then return "?", unpack(DIM) end
   if st.prio then return "P" .. st.prio, unpack(GOLD) end
   if st.has then return "has", unpack(GREY) end
-  if st.need then
-    local c = st.need == 1 and GREEN or WHITE
-    return "#" .. st.need .. "/" .. st.needOf, unpack(c)
-  end
+  if st.need then return "Wants", unpack(GREEN) end
   return "\226\128\148", unpack(DIM) -- em dash: not on their list
 end
 
---- A number that sorts best-first (bigger is better).
+--- A number that sorts best-first (bigger is better): officer picks in order, then everyone who wants it,
+--- then people who already have it. Wishlist order is not a ranking, so all "Wants" sort equal.
 function Loot.SortValue(st)
   if not st or st.unknownItem or not st.char then return -1 end
   if st.prio then return 10000 - st.prio end
-  if st.need then return 1000 - st.need end
+  if st.need then return 1000 end
   if st.has then return 1 end
   return 0
 end
@@ -202,7 +200,7 @@ function Loot.TooltipLines(st, name)
     add(" ", WHITE)
     if st.prio then add("Officer Prio pick #" .. st.prio .. (st.prioOf > 1 and (" of " .. st.prioOf) or ""), GOLD) end
     if st.has then add("Already has it  (Loot Log " .. tostring(st.has) .. ")", GREY)
-    elseif st.need then add("Wants it: " .. st.need .. (st.need == 1 and "st" or st.need == 2 and "nd" or st.need == 3 and "rd" or "th") .. " of " .. st.needOf .. " who still need it", st.need == 1 and GREEN or WHITE)
+    elseif st.need then add("Wants it" .. (st.needOf > 1 and ("  (one of " .. st.needOf .. " who still need it)") or ""), GREEN)
     elseif not st.prio then add("Not on their list", GREY) end
     if c.of and c.of > 0 then add("BiS progress " .. (c.bis or 0) .. " / " .. c.of, GREY) end
   end
@@ -226,10 +224,10 @@ function Loot.NeederLines(linkOrKey, n)
   end
   local nd = idx.need[ikey]
   if nd and nd.n > 0 then
-    out[#out + 1] = { "Still need it (" .. nd.n .. "):", WHITE[1], WHITE[2], WHITE[3] }
+    out[#out + 1] = { "Want it (" .. nd.n .. "):", WHITE[1], WHITE[2], WHITE[3] }
     for i = 1, math.min(n or 5, nd.n) do
       local c = idx.chars[nd.list[i]]
-      out[#out + 1] = { "  " .. i .. ". " .. (c and c.n or nd.list[i]) .. (c and c.rk and ("  " .. c.rk) or ""), GREY[1], GREY[2], GREY[3] }
+      out[#out + 1] = { "  " .. (c and c.n or nd.list[i]) .. (c and c.rk and ("  " .. c.rk) or ""), GREY[1], GREY[2], GREY[3] }
     end
     if nd.n > (n or 5) then out[#out + 1] = { "  …", DIM[1], DIM[2], DIM[3] } end
   end
