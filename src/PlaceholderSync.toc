@@ -1,0 +1,11 @@
+## Interface: 120105, 16001
+## Title: PlaceholderSync
+## Notes: Records the guild bank (and later your characters) so the bridge app can upload it for the guild.
+## Author: tomtko
+## Version: 0.1.0
+## SavedVariables: PlaceholderSyncDB
+## IconTexture: Interface\Icons\INV_Misc_Bag_10_Blue
+## X-Website: https://github.com/tomtko
+
+Core.lua
+GuildBank.lua
