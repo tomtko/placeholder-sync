@@ -31,10 +31,14 @@ local function qualityFromLink(link)
   return hex and QUALITY_BY_HEX[hex:lower()] or nil
 end
 
+-- Item names in links can carry UI markup, e.g. a crafting-quality icon: "Azeroot |A:Professions-ChatIcon-Quality-12-Tier1:17:15::1|a".
+-- We keep the plain name and record the crafting tier (1-3) separately.
 local function parseLink(link)
   local id = tonumber(link:match("|Hitem:(%d+)"))
-  local name = link:match("|h%[(.-)%]|h")
-  return id, name
+  local name = link:match("|h%[(.-)%]|h") or ""
+  local tier = tonumber(name:match("Quality%-%d+%-Tier(%d)"))
+  name = name:gsub("|A:.-|a", ""):gsub("|T.-|t", ""):gsub("%s+$", "")
+  return id, name, tier
 end
 
 local function readTab(tab)
@@ -43,11 +47,12 @@ local function readTab(tab)
     local ok, link = pcall(GetGuildBankItemLink, tab, slot)
     if ok and link then
       local _, texture, count, _, _, quality = pcall(GetGuildBankItemInfo, tab, slot)
-      local id, name = parseLink(link)
+      local id, name, tier = parseLink(link)
       items[#items + 1] = {
         slot = slot,
         id = id,
         name = name,
+        tier = tier,
         count = tonumber(count) or 1,
         quality = tonumber(quality) or qualityFromLink(link),
         icon = tonumber(texture) or nil,
