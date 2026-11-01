@@ -6,9 +6,10 @@
 
   Three datasets travel, each with its own version number:
     L  the loot sheet without the officer Prio layer, version = rev                          (into the game)
-    P  the officer Prio layer for one L rev, carried only on the OFFICER addon channel: the server delivers
-       that to ranks that can read officer chat and nobody else, so a non-officer's SavedVariables never
-       contains it and there is nothing to go looking for
+    P  the officer Prio layer for one L rev. It reaches two groups and nobody else: ranks that can read officer
+       chat (the OFFICER addon channel, enforced by the server) and the in-game ranks the bot names in
+       payload.prioRanks (e.g. "Council"), to whom a holder whispers it after checking the guild roster. The
+       rank list itself travels inside P, so the public copy carries no hint of it.
     B  the guild bank scan (<Addon>DB.guildBank), version = scan time, complete scans only   (out of the game)
   Anyone who opens the guild bank produces a B; it spreads to every addon user, so the PC with the bridge
   holds the newest scan from whoever opened the bank and uploads it at that officer's next /reload or logout.
@@ -16,7 +17,8 @@
 
   Wire protocol, one message per AceComm send (prefix = addon name, first byte = protocol version):
     2H<lootRev>,<bankAt>        "have": 10 s after login, every 5 minutes, after a change, in reply to an older H
-    2R<kind><ver>               "request": send me <kind> if yours is newer than ver (P: exactly ver, on OFFICER)
+    2R<kind><ver>               "request": send me <kind> if yours is newer than ver (P: exactly ver; answered on
+                                OFFICER when asked there, by whisper when asked on GUILD by an allowed rank)
     2S<kind><ver>               "sending": one chunk, goes out right before a D so other holders stand down
     2D<kind><ver>:<gen>:<b64>   the data: CBOR, zlib, base64 (loot about 15 KB, bank about 8 KB)
 
@@ -94,7 +96,41 @@ local function channelOpen(ch)
   if ch == "GUILD" then return IsInGuild() end
   if ch == "RAID" then return inHomeRaid() end
   if ch == "OFFICER" then return officerSelf() end
+  if ch:sub(1, 8) == "WHISPER:" then return true end
   return false
+end
+
+-- Guild roster: "Name-Realm" → lower-case rank name, refreshed on GUILD_ROSTER_UPDATE.
+local rankOf = {}
+local function refreshRoster()
+  if not IsInGuild() then wipe(rankOf) return end
+  local n = GetNumGuildMembers and GetNumGuildMembers() or 0
+  if n == 0 then return end
+  wipe(rankOf)
+  for i = 1, n do
+    local name, rankName = GetGuildRosterInfo(i)
+    if name and rankName then rankOf[name] = rankName:lower() end
+  end
+end
+
+-- In-game rank names the bot allows to hold the Prio layer (payload.prioRanks), lower-cased set.
+local function allowedRanks()
+  local c = NS.Loot and NS.Loot.Current()
+  local list = c and c.payload and c.payload.prioRanks
+  local set = {}
+  if type(list) == "table" then
+    for _, r in ipairs(list) do if type(r) == "string" then set[r:lower()] = true end end
+  end
+  return set
+end
+
+local function rankAllowed(sender)
+  local rank = rankOf[sender]
+  if not rank then
+    local short = sender:match("^([^-]+)")
+    if short then rank = rankOf[short] end
+  end
+  return rank ~= nil and allowedRanks()[rank] == true
 end
 
 local function channels()
@@ -112,7 +148,7 @@ local SETS = {}
 
 local function withoutPrio(payload)
   local out = {}
-  for k, v in pairs(payload) do if k ~= "prio" then out[k] = v end end
+  for k, v in pairs(payload) do if k ~= "prio" and k ~= "prioRanks" then out[k] = v end end
   return out
 end
 
@@ -146,7 +182,7 @@ SETS.L = {
   end,
 }
 
--- The officer Prio layer: { prio = { [ikey] = { ckey, ... } } } for exactly one L rev. OFFICER channel only.
+-- The officer Prio layer: { prio = { [ikey] = { ckey, ... } }, prioRanks = { "Council", ... } } for exactly one L rev.
 SETS.P = {
   name = "officer prio",
   version = function()
@@ -157,15 +193,17 @@ SETS.P = {
   current = function()
     local c = NS.Loot and NS.Loot.Current()
     if not c or type(c.payload.prio) ~= "table" then return nil end
-    return { prio = c.payload.prio }, 0
+    return { prio = c.payload.prio, prioRanks = c.payload.prioRanks }, 0
   end,
   plausible = function(p)
-    return type(p) == "table" and type(p.prio) == "table" and countKeys(p.prio) <= 5000
+    if type(p) ~= "table" or type(p.prio) ~= "table" or countKeys(p.prio) > 5000 then return false end
+    return p.prioRanks == nil or (type(p.prioRanks) == "table" and #p.prioRanks <= 50)
   end,
   apply = function(ver, _, p, sender)
     local c = NS.Loot and NS.Loot.Current()
     if not c or c.rev ~= ver or c.source ~= "shared" then return end
     NS.db.lootShared.payload.prio = p.prio
+    NS.db.lootShared.payload.prioRanks = p.prioRanks
     NS.db.lootShared.prioRev = ver
     NS.Loot.Reset()
     NS.Print("officer data for loot sheet rev %d received from %s.", ver, short(sender))
@@ -285,11 +323,13 @@ local function sendRequest(kind, ch)
   Ace:SendCommMessage(PREFIX, PROTO .. "R" .. kind .. SETS[kind].version(), ch, nil, "NORMAL")
 end
 
--- ch is "GUILD", "RAID", or "OFFICER" (the Prio layer only).
+-- ch is "GUILD", "RAID", "OFFICER" (Prio layer) or "WHISPER:<Name-Realm>" (Prio layer to an allowed rank).
 local function sendData(kind, ch, to)
   local ks = kstate(kind)
   ks.pendingSend[ch] = nil
   if not channelOpen(ch) then return end
+  local dist, target = ch, nil
+  if ch:sub(1, 8) == "WHISPER:" then dist, target = "WHISPER", ch:sub(9) end
   if not canSendNow() then later("D" .. kind .. ch, function() sendData(kind, ch, to) end) return end
   local now = GetTime()
   if (ks.lastSend[ch] or 0) > now - QUIET then return end
@@ -303,8 +343,8 @@ local function sendData(kind, ch, to)
   ks.lastSend[ch] = now
   state.sent = state.sent + 1
   ks.lastShared = { to = to, ver = ver, at = time() }
-  Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, ch, nil, "ALERT")
-  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, ch, nil, "BULK")
+  if not target then Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, dist, nil, "ALERT") end
+  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, dist, target, "BULK")
 end
 
 local function scheduleRequest(kind, ch, theirVer)
@@ -358,10 +398,12 @@ local function onComm(_, msg, channel, sender)
   local kind = msg:sub(3, 3)
   if channel == "OFFICER" then
     if op == "H" or kind ~= "P" then return end -- only the Prio layer lives on officer chat
+  elseif channel == "WHISPER" then
+    if not (op == "D" and kind == "P") then return end -- a whispered Prio layer, nothing else
   elseif channel ~= "GUILD" and channel ~= "RAID" then
     return
-  elseif op ~= "H" and kind == "P" then
-    return -- the Prio layer never travels on guild or raid
+  elseif op ~= "H" and kind == "P" and op ~= "R" then
+    return -- on guild and raid the Prio layer is only ever asked for, never sent
   end
   if op == "H" then
     local l, b = msg:match("^.H(%d+),(%d+)$")
@@ -390,7 +432,10 @@ local function onComm(_, msg, channel, sender)
     if (ks.inbound[sender] or 0) > now - INBOUND_QUIET then return end
     ks.inbound[sender] = now
     if kind == "P" then
-      if mine == ver then scheduleSend("P", "OFFICER", sender) end -- exactly this rev; the channel limits who hears it
+      if mine ~= ver then return end -- exactly this rev
+      if channel == "OFFICER" then scheduleSend("P", "OFFICER", sender)          -- the channel limits who hears it
+      elseif rankAllowed(sender) then scheduleSend("P", "WHISPER:" .. sender, sender) -- an allowed in-game rank
+      end
     elseif mine > ver then
       scheduleSend(kind, channel, sender)
     end
@@ -416,11 +461,11 @@ local function onComm(_, msg, channel, sender)
   end
 end
 
---- Officers: ask officer chat for the Prio layer of the loot sheet rev we hold, when we do not have it yet.
+--- Ask for the Prio layer of the loot sheet rev we hold, when we do not have it yet: officers on officer chat,
+--- everyone else once on guild chat (one tiny message; holders answer only ranks the bot allows, others hear nothing).
 requestPrio = function()
-  if not NS.Loot or SETS.L.version() == 0 or SETS.P.version() ~= 0 then return end
-  if not officerSelf() then return end
-  scheduleRequest("P", "OFFICER", SETS.L.version())
+  if not NS.Loot or SETS.L.version() == 0 or SETS.P.version() ~= 0 or not IsInGuild() then return end
+  scheduleRequest("P", officerSelf() and "OFFICER" or "GUILD", SETS.L.version())
 end
 
 -- Lifecycle -------------------------------------------------------------------------------------
@@ -478,8 +523,8 @@ function Sync.Status()
     local ls = K[kind] and K[kind].lastShared
     if ls then parts[#parts + 1] = ("%s last sent to %s %ds ago"):format(set.name, short(ls.to), time() - ls.at) end
   end
-  -- Officers only. A raider's status never mentions that officers hold anything extra.
-  if SETS.L.version() > 0 and officerSelf() then
+  -- Holders only. A raider's status never mentions that officers hold anything extra.
+  if SETS.L.version() > 0 and (SETS.P.version() > 0 or officerSelf()) then
     parts[#parts + 1] = SETS.P.version() > 0 and "officer data present" or "officer data not received yet"
   end
   local gb = NS.db and NS.db.guildBank
@@ -501,6 +546,7 @@ function Sync.Start()
   local f = CreateFrame("Frame")
   f:RegisterEvent("PLAYER_REGEN_ENABLED")
   f:RegisterEvent("GROUP_JOINED")
+  f:RegisterEvent("GUILD_ROSTER_UPDATE")
   pcall(f.RegisterEvent, f, "ADDON_RESTRICTION_STATE_CHANGED")
   f:SetScript("OnEvent", function(_, event, a1, a2)
     if event == "PLAYER_REGEN_ENABLED" then
@@ -519,9 +565,15 @@ function Sync.Start()
       if not state.restricted then flush() end
     elseif event == "GROUP_JOINED" then
       C_Timer.After(5, Sync.Announce)
+    elseif event == "GUILD_ROSTER_UPDATE" then
+      refreshRoster()
     end
   end)
 
+  if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
   C_Timer.After(10, Sync.Announce)
-  C_Timer.NewTicker(ANNOUNCE_EVERY, Sync.Announce)
+  C_Timer.NewTicker(ANNOUNCE_EVERY, function()
+    if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
+    Sync.Announce()
+  end)
 end
