@@ -75,10 +75,12 @@ local function paintEntry(entry)
   local f = entry and entry.frame
   if not f then return end
   if not f.psBadge then
+    -- Under RCLC's "Time Left" line, right-aligned: the spot WowUtils uses for its sim value (its logo button sits
+    -- at -5,-5, 16 px tall, and the value hangs 5 px below it), so neither text covers the timer.
     local b = CreateFrame("Button", nil, f)
-    b:SetSize(64, 14)
-    b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -6)
-    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b:SetSize(90, 14)
+    b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -26)
+    b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     b.text:SetAllPoints(b)
     b.text:SetJustifyH("RIGHT")
     b:SetScript("OnEnter", function(self) if self.psLink then PS.Loot.SelfTooltip(self, self.psLink, PS.PlayerKey()) end end)
