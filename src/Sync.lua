@@ -168,7 +168,7 @@ SETS.P = {
     NS.db.lootShared.payload.prio = p.prio
     NS.db.lootShared.prioRev = ver
     NS.Loot.Reset()
-    NS.Print("officer Prio for loot sheet rev %d received from %s.", ver, short(sender))
+    NS.Print("officer data for loot sheet rev %d received from %s.", ver, short(sender))
   end,
   forget = function() end, -- lives inside lootShared, dropped with it
 }
@@ -478,8 +478,9 @@ function Sync.Status()
     local ls = K[kind] and K[kind].lastShared
     if ls then parts[#parts + 1] = ("%s last sent to %s %ds ago"):format(set.name, short(ls.to), time() - ls.at) end
   end
-  if SETS.L.version() > 0 then
-    parts[#parts + 1] = SETS.P.version() > 0 and "officer Prio layer present" or (officerSelf() and "officer Prio layer not received yet" or "no officer Prio layer (no officer chat access)")
+  -- Officers only. A raider's status never mentions that officers hold anything extra.
+  if SETS.L.version() > 0 and officerSelf() then
+    parts[#parts + 1] = SETS.P.version() > 0 and "officer data present" or "officer data not received yet"
   end
   local gb = NS.db and NS.db.guildBank
   if gb and gb.sharedFrom then parts[#parts + 1] = ("bank scan here is %s's, received %s"):format(short(gb.sharedFrom), date("%d/%m %H:%M", gb.receivedAt or 0)) end
