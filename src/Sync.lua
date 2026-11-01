@@ -6,8 +6,9 @@
 
   Three datasets travel, each with its own version number:
     L  the loot sheet without the officer Prio layer, version = rev                          (into the game)
-    P  the officer Prio layer for one L rev, whispered only to characters the sheet ranks as officers;
-       a non-officer's SavedVariables never contains it, so there is nothing to go looking for
+    P  the officer Prio layer for one L rev, carried only on the OFFICER addon channel: the server delivers
+       that to ranks that can read officer chat and nobody else, so a non-officer's SavedVariables never
+       contains it and there is nothing to go looking for
     B  the guild bank scan (<Addon>DB.guildBank), version = scan time, complete scans only   (out of the game)
   Anyone who opens the guild bank produces a B; it spreads to every addon user, so the PC with the bridge
   holds the newest scan from whoever opened the bank and uploads it at that officer's next /reload or logout.
@@ -15,7 +16,7 @@
 
   Wire protocol, one message per AceComm send (prefix = addon name, first byte = protocol version):
     2H<lootRev>,<bankAt>        "have": 10 s after login, every 5 minutes, after a change, in reply to an older H
-    2R<kind><ver>               "request": send me <kind> if yours is newer than ver (P: exactly ver, answered by whisper)
+    2R<kind><ver>               "request": send me <kind> if yours is newer than ver (P: exactly ver, on OFFICER)
     2S<kind><ver>               "sending": one chunk, goes out right before a D so other holders stand down
     2D<kind><ver>:<gen>:<b64>   the data: CBOR, zlib, base64 (loot about 15 KB, bank about 8 KB)
 
@@ -81,9 +82,18 @@ local function inHomeRaid()
   return IsInRaid()
 end
 
+--- Can this character use officer chat? The game decides who is an officer, whatever the rank is called.
+local function officerSelf()
+  if not IsInGuild() then return false end
+  if C_GuildInfo and C_GuildInfo.IsGuildOfficer then return C_GuildInfo.IsGuildOfficer() == true end
+  if C_GuildInfo and C_GuildInfo.CanViewOfficerNote then return C_GuildInfo.CanViewOfficerNote() == true end
+  return false
+end
+
 local function channelOpen(ch)
   if ch == "GUILD" then return IsInGuild() end
   if ch == "RAID" then return inHomeRaid() end
+  if ch == "OFFICER" then return officerSelf() end
   return false
 end
 
@@ -136,10 +146,9 @@ SETS.L = {
   end,
 }
 
--- The officer Prio layer: { prio = { [ikey] = { ckey, ... } } } for exactly one L rev.
+-- The officer Prio layer: { prio = { [ikey] = { ckey, ... } } } for exactly one L rev. OFFICER channel only.
 SETS.P = {
   name = "officer prio",
-  whisperOnly = true,
   version = function()
     local c = NS.Loot and NS.Loot.Current()
     if not c or type(c.payload.prio) ~= "table" then return 0 end
@@ -156,7 +165,6 @@ SETS.P = {
   apply = function(ver, _, p, sender)
     local c = NS.Loot and NS.Loot.Current()
     if not c or c.rev ~= ver or c.source ~= "shared" then return end
-    if not NS.Loot.IsOfficer(me) then return end
     NS.db.lootShared.payload.prio = p.prio
     NS.db.lootShared.prioRev = ver
     NS.Loot.Reset()
@@ -277,13 +285,11 @@ local function sendRequest(kind, ch)
   Ace:SendCommMessage(PREFIX, PROTO .. "R" .. kind .. SETS[kind].version(), ch, nil, "NORMAL")
 end
 
--- ch is "GUILD", "RAID", or "WHISPER:<Name-Realm>" for the officer-only Prio layer.
+-- ch is "GUILD", "RAID", or "OFFICER" (the Prio layer only).
 local function sendData(kind, ch, to)
   local ks = kstate(kind)
   ks.pendingSend[ch] = nil
-  local dist, target = ch, nil
-  if ch:sub(1, 8) == "WHISPER:" then dist, target = "WHISPER", ch:sub(9) end
-  if dist ~= "WHISPER" and not channelOpen(ch) then return end
+  if not channelOpen(ch) then return end
   if not canSendNow() then later("D" .. kind .. ch, function() sendData(kind, ch, to) end) return end
   local now = GetTime()
   if (ks.lastSend[ch] or 0) > now - QUIET then return end
@@ -297,8 +303,8 @@ local function sendData(kind, ch, to)
   ks.lastSend[ch] = now
   state.sent = state.sent + 1
   ks.lastShared = { to = to, ver = ver, at = time() }
-  if dist ~= "WHISPER" then Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, dist, nil, "ALERT") end
-  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, dist, target, "BULK")
+  Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, ch, nil, "ALERT")
+  Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, ch, nil, "BULK")
 end
 
 local function scheduleRequest(kind, ch, theirVer)
@@ -350,10 +356,12 @@ local function onComm(_, msg, channel, sender)
   if isMe(sender) then return end
   local op = msg:sub(2, 2)
   local kind = msg:sub(3, 3)
-  if channel == "WHISPER" then
-    if not (op == "D" and kind == "P") then return end -- only the Prio layer travels by whisper
+  if channel == "OFFICER" then
+    if op == "H" or kind ~= "P" then return end -- only the Prio layer lives on officer chat
   elseif channel ~= "GUILD" and channel ~= "RAID" then
     return
+  elseif op ~= "H" and kind == "P" then
+    return -- the Prio layer never travels on guild or raid
   end
   if op == "H" then
     local l, b = msg:match("^.H(%d+),(%d+)$")
@@ -382,8 +390,7 @@ local function onComm(_, msg, channel, sender)
     if (ks.inbound[sender] or 0) > now - INBOUND_QUIET then return end
     ks.inbound[sender] = now
     if kind == "P" then
-      -- Exactly this rev, and only to someone the sheet ranks as an officer, by whisper.
-      if mine == ver and NS.Loot and NS.Loot.IsOfficer(sender) then scheduleSend("P", "WHISPER:" .. sender, sender) end
+      if mine == ver then scheduleSend("P", "OFFICER", sender) end -- exactly this rev; the channel limits who hears it
     elseif mine > ver then
       scheduleSend(kind, channel, sender)
     end
@@ -405,17 +412,15 @@ local function onComm(_, msg, channel, sender)
       return
     end
     apply(kind, ver, tonumber(gen), b64, sender)
-    if kind == "L" then C_Timer.After(1, function() requestPrio(channel) end) end
+    if kind == "L" then C_Timer.After(1, requestPrio) end
   end
 end
 
---- Officers: ask for the Prio layer of the loot sheet rev we hold, when we do not have it yet.
-requestPrio = function(ch)
+--- Officers: ask officer chat for the Prio layer of the loot sheet rev we hold, when we do not have it yet.
+requestPrio = function()
   if not NS.Loot or SETS.L.version() == 0 or SETS.P.version() ~= 0 then return end
-  if not NS.Loot.IsOfficer(me) then return end
-  if ch ~= "GUILD" and ch ~= "RAID" then ch = IsInGuild() and "GUILD" or (inHomeRaid() and "RAID" or nil) end
-  if not ch then return end
-  scheduleRequest("P", ch, SETS.L.version())
+  if not officerSelf() then return end
+  scheduleRequest("P", "OFFICER", SETS.L.version())
 end
 
 -- Lifecycle -------------------------------------------------------------------------------------
@@ -431,7 +436,7 @@ end
 
 function Sync.Announce()
   for _, ch in ipairs(channels()) do sendHave(ch) end
-  requestPrio(nil)
+  requestPrio()
 end
 
 --- Something we hold changed (bank closed after a scan, loot file reloaded): announce it right away.
@@ -453,7 +458,7 @@ function Sync.RequestNow()
     end
   end
   kstate("P").lastRequest = 0
-  requestPrio(chs[1])
+  requestPrio()
   NS.Print("asked %s for loot sheet data newer than rev %d and bank scans newer than %s.",
     table.concat(chs, " and "):lower(), SETS.L.version(), SETS.B.version() > 0 and date("%d/%m %H:%M", SETS.B.version()) or "none")
 end
@@ -474,7 +479,7 @@ function Sync.Status()
     if ls then parts[#parts + 1] = ("%s last sent to %s %ds ago"):format(set.name, short(ls.to), time() - ls.at) end
   end
   if SETS.L.version() > 0 then
-    parts[#parts + 1] = SETS.P.version() > 0 and "officer Prio layer present" or (NS.Loot.IsOfficer(me) and "officer Prio layer not received yet" or "no officer Prio layer (not an officer on the sheet)")
+    parts[#parts + 1] = SETS.P.version() > 0 and "officer Prio layer present" or (officerSelf() and "officer Prio layer not received yet" or "no officer Prio layer (no officer chat access)")
   end
   local gb = NS.db and NS.db.guildBank
   if gb and gb.sharedFrom then parts[#parts + 1] = ("bank scan here is %s's, received %s"):format(short(gb.sharedFrom), date("%d/%m %H:%M", gb.receivedAt or 0)) end
@@ -503,7 +508,7 @@ function Sync.Start()
         ks.stash = nil
         if s and s.ver > SETS[kind].version() then
           apply(kind, s.ver, s.gen, s.b64, s.sender)
-          if kind == "L" then C_Timer.After(1, function() requestPrio(s.channel) end) end
+          if kind == "L" then C_Timer.After(1, requestPrio) end
         end
       end
       flush()

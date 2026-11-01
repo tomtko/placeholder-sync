@@ -77,12 +77,8 @@ local function build()
   index = {
     rev = d.rev, writtenAt = d.writtenAt, generatedAt = p.generatedAt or d.generatedAt, source = d.source, from = d.from,
     items = p.items or {}, names = p.names or {}, chars = p.chars or {}, owned = p.owned or {},
-    need = {}, prio = {}, byHalf = {}, hasPrio = type(p.prio) == "table", officers = nil,
+    need = {}, prio = {}, byHalf = {}, hasPrio = type(p.prio) == "table",
   }
-  if type(p.officers) == "table" then -- optional explicit list from the bot; otherwise the sheet rank decides
-    index.officers = {}
-    for _, key in ipairs(p.officers) do index.officers[key] = true end
-  end
   for id, list in pairs(p.needers or {}) do index.need[id] = position(list) end
   for id, list in pairs(p.prio or {}) do index.prio[id] = position(list) end
   -- Forever names are "First Last"; some sources give one half. Map each half to the keys that contain it.
@@ -184,25 +180,7 @@ function Loot.Standing(linkOrKey, name)
   return st
 end
 
-local OFFICER_RANKS = { officer = true, gm = true, ["guild master"] = true, ["co-gm"] = true, ["guild lead"] = true }
-
---- Is this sheet character an officer? Decides who may hold the officer Prio layer (Sync.lua). nil = no data.
-function Loot.IsOfficerKey(key)
-  local idx = Loot.Ensure()
-  if not idx or not key then return nil end
-  if idx.officers then return idx.officers[key] == true end
-  local c = idx.chars[key]
-  local rk = c and type(c.rk) == "string" and c.rk:lower() or ""
-  return OFFICER_RANKS[rk] == true
-end
-
---- "Name-Realm" → officer or not (false when the sheet does not know them).
-function Loot.IsOfficer(name)
-  local key = Loot.ResolveKey(name)
-  return key and Loot.IsOfficerKey(key) or false
-end
-
---- Does the data in use carry the officer Prio layer?
+--- Does the data in use carry the officer Prio layer? (Only officer-chat ranks ever receive it, see Sync.lua.)
 function Loot.HasPrio()
   local idx = Loot.Ensure()
   return idx and idx.hasPrio or false
