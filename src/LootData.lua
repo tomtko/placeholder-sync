@@ -1,5 +1,7 @@
 --[[
-  LootData.lua: the officers' loot sheet, in game. The bridge writes Data.lua (see there); this file turns it into
+  LootData.lua: the officers' loot sheet, in game. The bridge writes a companion addon <AddonName>_Data (listed in
+  our OptionalDeps so it loads first) whose Data.lua defines <AddonName>_Data = { rev, writtenAt, generatedAt,
+  payload }; this file turns it into
   O(1) lookups for the loot council column: for an item and a candidate, are they an officer Prio pick, where do
   they stand among the people who need it, do they already have it.
 

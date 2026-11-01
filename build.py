@@ -57,6 +57,7 @@ def main() -> int:
     toc = re.sub(r"^## Title:.*$", f"## Title: {addon}", toc, flags=re.M)
     toc = re.sub(r"^## Version:.*$", f"## Version: {version}", toc, flags=re.M)
     toc = re.sub(r"^## SavedVariables:.*$", f"## SavedVariables: {addon}DB", toc, flags=re.M)
+    toc = re.sub(r"^## OptionalDeps: \w+_Data,", f"## OptionalDeps: {addon}_Data,", toc, flags=re.M)  # the bridge's companion folder
     (stage / f"{addon}.toc").write_text(toc, encoding="utf-8")
 
     modules = {}  # the council columns live inside the main addon now (Council_*.lua)
@@ -79,13 +80,9 @@ def main() -> int:
                 shutil.rmtree(addons_dir / stale)
         for folder, src in [(addon, stage), *modules.items()]:
             target = addons_dir / folder
-            keep_data = target / "Data.lua"
-            data_backup = keep_data.read_text(encoding="utf-8") if folder == addon and keep_data.exists() else None
             if target.exists():
-                shutil.rmtree(target)
+                shutil.rmtree(target)  # the bridge's data lives in <addon>_Data next door, so nothing here is kept
             shutil.copytree(src, target)
-            if data_backup is not None and "_Data = {" in data_backup:
-                (target / "Data.lua").write_text(data_backup, encoding="utf-8")  # keep what the bridge wrote
         print(f"installed {addon} + {len(modules)} module(s) to {addons_dir}")
         sv = Path(args.wow) / args.flavor / "WTF" / "Account"
         print(f"SavedVariables will appear under {sv}/<account>/SavedVariables/{addon}.lua after a /reload")
