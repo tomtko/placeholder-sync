@@ -10,7 +10,8 @@
        chat (the OFFICER addon channel, enforced by the server) and the in-game ranks the bot names in
        payload.prioRanks (e.g. "Council"), to whom a holder whispers it after checking the guild roster. The
        rank list itself travels inside P, so the public copy carries no hint of it.
-    B  the guild bank scan (<Addon>DB.guildBank), version = scan time, complete scans only   (out of the game)
+    B  the guild bank scan (<Addon>DB.guildBank), version = scan time; merged tab by tab on arrival, so a
+       character who can view only some tabs refreshes those and never wipes the rest       (out of the game)
   Anyone who opens the guild bank produces a B; it spreads to every addon user, so the PC with the bridge
   holds the newest scan from whoever opened the bank and uploads it at that officer's next /reload or logout.
   A received scan is only kept when it is for the receiver's own guild.
@@ -46,6 +47,15 @@ local MAX_ENCODED = 250000   -- bytes: refuse anything bigger than this on the w
 local Ace = LibStub and LibStub("AceComm-3.0", true)
 local EU = C_EncodingUtil
 local me
+local debugOn = false
+local short -- defined below
+local function dbg(fmt, ...) if debugOn then NS.Print("|cff8b90a0sync|r " .. fmt, ...) end end
+local function wire(dir, kind, text, ch, sender)
+  if not debugOn then return end
+  local head = text:sub(1, 1) == PROTO and text:sub(2, 3) or text:sub(1, 2)
+  local size = #text
+  dbg("%s %s %s %s%s", dir, head, ch, sender and (short(sender) .. " ") or "", size > 40 and ("(" .. size .. " bytes)") or text)
+end
 
 local state = {
   started = false,
@@ -71,7 +81,7 @@ end
 
 -- Helpers ---------------------------------------------------------------------------------------
 
-local function short(name) return (Ambiguate and Ambiguate(name or "?", "short")) or name or "?" end
+function short(name) return (Ambiguate and Ambiguate(name or "?", "short")) or name or "?" end
 
 local function isMe(sender)
   if not sender then return true end
@@ -215,7 +225,7 @@ SETS.B = {
   name = "guild bank",
   version = function()
     local gb = NS.db and NS.db.guildBank
-    if not gb or gb.complete == false or type(gb.at) ~= "number" then return 0 end
+    if not gb or type(gb.at) ~= "number" or type(gb.tabs) ~= "table" then return 0 end
     return gb.at
   end,
   current = function()
@@ -225,7 +235,6 @@ SETS.B = {
   end,
   plausible = function(gb)
     if type(gb) ~= "table" or type(gb.at) ~= "number" or type(gb.tabs) ~= "table" or type(gb.guild) ~= "string" then return false end
-    if gb.complete ~= true then return false end
     local mine = GetGuildInfo("player")
     if not mine or mine ~= gb.guild then return false end -- someone else's guild, or we are not in one
     local items = 0
@@ -238,8 +247,9 @@ SETS.B = {
   apply = function(ver, _, gb, sender)
     gb.sharedFrom = sender
     gb.receivedAt = time()
-    NS.db.guildBank = gb
+    NS.db.guildBank = NS.MergeBank(NS.db.guildBank, gb) -- tabs they could not view stay as we had them
     NS.pendingUpload = true -- the bridge gets it at this PC's next /reload or logout
+    dbg("bank scan from %s merged: %d tabs, complete=%s", short(sender), #NS.db.guildBank.tabs, tostring(NS.db.guildBank.complete))
   end,
   forget = function()
     local gb = NS.db and NS.db.guildBank
@@ -300,6 +310,7 @@ local function sendHave(ch)
   local now = GetTime()
   if (state.lastHave[ch] or 0) > now - QUIET then return end
   state.lastHave[ch] = now
+  wire("out", "H", haveText(), ch)
   Ace:SendCommMessage(PREFIX, haveText(), ch, nil, "NORMAL")
 end
 
@@ -320,6 +331,7 @@ local function sendRequest(kind, ch)
   if not channelOpen(ch) then return end
   if not canSendNow() then later("R" .. kind .. ch, function() sendRequest(kind, ch) end) return end
   ks.lastRequest = GetTime()
+  wire("out", kind, PROTO .. "R" .. kind .. SETS[kind].version(), ch)
   Ace:SendCommMessage(PREFIX, PROTO .. "R" .. kind .. SETS[kind].version(), ch, nil, "NORMAL")
 end
 
@@ -344,6 +356,7 @@ local function sendData(kind, ch, to)
   state.sent = state.sent + 1
   ks.lastShared = { to = to, ver = ver, at = time() }
   if not target then Ace:SendCommMessage(PREFIX, PROTO .. "S" .. kind .. ver, dist, nil, "ALERT") end
+  dbg("out D%s %d to %s (%d bytes)", kind, ver, target or dist, #b64)
   Ace:SendCommMessage(PREFIX, PROTO .. "D" .. kind .. ver .. ":" .. string.format("%.0f", gen or 0) .. ":" .. b64, dist, target, "BULK")
 end
 
@@ -380,7 +393,8 @@ end
 local function apply(kind, ver, gen, b64, sender)
   local set = SETS[kind]
   local p = decode(b64)
-  if not p or not set.plausible(p) then return end
+  if not p then dbg("D%s %d from %s did not decode", kind, ver, short(sender)) return end
+  if not set.plausible(p) then dbg("D%s %d from %s failed the shape check", kind, ver, short(sender)) return end
   if set.version() >= ver then return end
   if kind == "P" and SETS.L.version() ~= ver then return end -- a Prio layer for a rev we do not hold
   set.apply(ver, gen, p, sender)
@@ -392,7 +406,9 @@ end
 local requestPrio -- defined below
 
 local function onComm(_, msg, channel, sender)
-  if type(msg) ~= "string" or msg:sub(1, 1) ~= PROTO then return end
+  if type(msg) ~= "string" then return end
+  wire("in", "", msg, channel, sender)
+  if msg:sub(1, 1) ~= PROTO then dbg("dropped: protocol %s, ours is %s", msg:sub(1, 1), PROTO) return end
   if isMe(sender) then return end
   local op = msg:sub(2, 2)
   local kind = msg:sub(3, 3)
@@ -515,6 +531,13 @@ function Sync.Forget()
   NS.Print("shared copies dropped.")
 end
 
+--- /psync debug: print every message in and out.
+function Sync.ToggleDebug()
+  debugOn = not debugOn
+  NS.Print("sync debug %s. Me: %s, prefix %s, versions L=%d B=%d P=%d, channels: %s.", debugOn and "on" or "off", tostring(me), PREFIX,
+    SETS.L.version(), SETS.B.version(), SETS.P.version(), table.concat(channels(), "+"))
+end
+
 function Sync.Status()
   if not state.started then return "sharing off (" .. (select(2, Sync.Available()) or "not started") .. ")" end
   local chs = table.concat(channels(), "+"):lower()
@@ -562,6 +585,7 @@ function Sync.Start()
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" then
       if Enum.AddOnRestrictionType and a1 ~= Enum.AddOnRestrictionType.Chat then return end
       state.restricted = Enum.AddOnRestrictionState and a2 ~= Enum.AddOnRestrictionState.Inactive or false
+      dbg("addon chat restriction: %s", state.restricted and "on" or "off")
       if not state.restricted then flush() end
     elseif event == "GROUP_JOINED" then
       C_Timer.After(5, Sync.Announce)

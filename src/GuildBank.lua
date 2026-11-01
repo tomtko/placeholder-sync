@@ -83,7 +83,7 @@ local function finishScan(complete)
   end
 
   local guild, _, _, realm = GetGuildInfo("player")
-  NS.db.guildBank = {
+  local fresh = {
     guild = guild,
     realm = realm or ((GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName()),
     by = NS.PlayerKey(),
@@ -92,11 +92,53 @@ local function finishScan(complete)
     complete = complete and s.complete,
     tabs = tabs,
   }
+  -- Tabs this character cannot view keep whatever an earlier scan (ours or a guildmate's, Sync.lua) held.
+  NS.db.guildBank = NS.MergeBank(NS.db.guildBank, fresh)
   NS.pendingUpload = true
 
   local gb = NS.db.guildBank
+  local hidden = 0
+  for _, t in ipairs(tabs) do if not t.viewable then hidden = hidden + 1 end end
+  local note = ""
+  if not gb.complete then note = " (some tabs did not answer)" end
+  if hidden > 0 then note = note .. (" (%d tab%s you cannot view, kept from earlier scans)"):format(hidden, hidden == 1 and "" or "s") end
   NS.Print("bank saved: %s, %d items in %d tabs%s. It uploads at your next /reload or logout.",
-    NS.FormatMoney(gb.money), countItems(tabs), #tabs, gb.complete and "" or " (some tabs did not answer)")
+    NS.FormatMoney(gb.money), countItems(gb.tabs), #gb.tabs, note)
+end
+
+--- Merge two scans of the same guild bank tab by tab: a tab is taken from `inc` only when `inc` actually saw
+--- it (viewable, answered) and saw it no earlier than what we hold. Money comes from the newer scan. `at`
+--- is the newer scan time (it doubles as the sharing version), `by` the character who saw the newest tab.
+--- Different guild or nothing held yet: `inc` as is.
+function NS.MergeBank(cur, inc)
+  if not inc then return cur end
+  if not cur or type(cur.tabs) ~= "table" or cur.guild ~= inc.guild then return inc end
+  local curBy, incBy, order, seen = {}, {}, {}, {}
+  for _, t in ipairs(cur.tabs) do curBy[t.index] = t if not seen[t.index] then seen[t.index] = true order[#order + 1] = t.index end end
+  for _, t in ipairs(inc.tabs or {}) do incBy[t.index] = t if not seen[t.index] then seen[t.index] = true order[#order + 1] = t.index end end
+  table.sort(order)
+  local function has(t, scanAt) return t and t.viewable and not t.missing and (t.at or scanAt or 0) end
+  local tabs, complete, newestAt, newestBy = {}, true, 0, nil
+  for _, i in ipairs(order) do
+    local a, b = curBy[i], incBy[i]
+    local aAt, bAt = has(a, cur.at), has(b, inc.at)
+    local pick = a
+    if bAt and (not aAt or bAt >= aAt) then pick = b
+    elseif not a then pick = b end
+    if pick == a and a and b then a.name = b.name or a.name a.icon = b.icon or a.icon end
+    tabs[#tabs + 1] = pick
+    if not (pick and pick.viewable and not pick.missing and not pick.timedOut) then complete = false end
+    local pickAt = pick and has(pick, pick == b and inc.at or cur.at)
+    if pickAt and pickAt > newestAt then newestAt, newestBy = pickAt, pick.by or (pick == b and inc.by or cur.by) end
+  end
+  local newer = (inc.at or 0) >= (cur.at or 0) and inc or cur
+  return {
+    guild = inc.guild, realm = inc.realm or cur.realm,
+    at = math.max(inc.at or 0, cur.at or 0),
+    by = newestBy or newer.by,
+    money = newer.money, complete = complete, tabs = tabs,
+    sharedFrom = newer.sharedFrom, receivedAt = newer.receivedAt,
+  }
 end
 
 local nextTab
@@ -110,7 +152,7 @@ local function tabAnswered()
   -- Give the remaining slot updates a moment to land, then read the whole tab.
   C_Timer.After(SETTLE, function()
     if not scan or scan.pos ~= pos then return end
-    scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index) }
+    scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index), at = time(), by = NS.PlayerKey() }
     nextTab()
   end)
 end
@@ -140,7 +182,7 @@ nextTab = function()
     if scan and scan.waiting == t.index then
       scan.complete = false
       scan.waiting = nil
-      scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index), timedOut = true }
+      scan.results[t.index] = { index = t.index, name = t.name, icon = t.icon, viewable = true, items = readTab(t.index), timedOut = true, at = time(), by = NS.PlayerKey() }
       nextTab()
     end
   end)
@@ -183,6 +225,8 @@ local function viewedTabChanged()
       t.viewable = true
       t.missing = nil
       t.timedOut = nil
+      t.at = time()
+      t.by = NS.PlayerKey()
       break
     end
   end

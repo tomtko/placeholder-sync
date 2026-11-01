@@ -176,6 +176,8 @@ SlashCmdList[key] = function(msg)
     if NS.Sync then NS.Sync.RequestNow() end
   elseif msg == "forget" then
     if NS.Sync then NS.Sync.Forget() end
+  elseif msg == "debug" then
+    if NS.Sync then NS.Sync.ToggleDebug() end
   elseif msg == "" or msg == "status" then
     status()
   else
