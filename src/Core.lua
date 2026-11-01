@@ -10,6 +10,7 @@
       guildBank  = { guild, realm, by, at, money, complete, tabs = { { index, name, icon, items = { ... } } } },
       characters = { [guid] = { name, realm, class, level, updatedAt } },   -- identity only for now
       lootShared = { rev, generatedAt, receivedAt, from, payload },          -- loot sheet copy from another officer (Sync.lua)
+      lootAwards = { [uid] = { src, id, at, to, itemId, name, response, ... } }, -- council awards for the sheet's Loot Log (LootLog.lua)
       _apiCheck  = { "GetGuildBankItemLink", ... },                          -- API names missing on this client
     }
 ]]
@@ -156,6 +157,10 @@ local function status()
     NS.Print("loot sheet data: rev %s, %d items, %s %s.", tostring(info.rev), info.items, how, date("%d/%m %H:%M", info.writtenAt or 0))
   else NS.Print("no loot sheet data yet. The bridge writes it, or another officer's addon shares it in game (%s sync asks now).", SLASH) end
   if NS.Sync then NS.Print(NS.Sync.Status() .. ".") end
+  if NS.LootLog then
+    local n, week = NS.LootLog.Count()
+    NS.Print("%d council award%s recorded for the Loot Log (%d this week).", n, n == 1 and "" or "s", week)
+  end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
 end
@@ -178,6 +183,12 @@ SlashCmdList[key] = function(msg)
     if NS.Sync then NS.Sync.Forget() end
   elseif msg == "debug" then
     if NS.Sync then NS.Sync.ToggleDebug() end
+  elseif msg == "awards" then
+    if NS.LootLog then
+      local n = NS.LootLog.Sweep() or 0
+      local total = NS.LootLog.Count()
+      NS.Print("%d new award%s picked up, %d recorded. They upload at your next /reload or logout.", n, n == 1 and "" or "s", total)
+    end
   elseif msg == "" or msg == "status" then
     status()
   else
@@ -225,6 +236,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
       local ok, err = pcall(NS.Sync.Start)
       if not ok then NS.Print("sharing failed to start: %s", tostring(err)) end
     end
+    if NS.LootLog then pcall(NS.LootLog.Start) end
     if #missing > 0 then
       NS.Print("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
     end
@@ -232,6 +244,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if NS.db then
       NS.db.meta = clientMeta()
       pcall(NS.RecordCharacter)
+      if NS.LootLog then pcall(NS.LootLog.Sweep) end
     end
   end
 end)
