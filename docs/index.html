@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Placeholder guild tools</title>
+<meta name="description" content="How to install the PlaceholderSync addon and the Placeholder Bridge, and what they do.">
+<style>
+  :root { --page:#0e0f11; --card:#15161b; --line:#2a2c33; --fg:#e4e7ee; --muted:#8f96a3; --accent:#7aa2f7; --gold:#e0af68; --green:#9ece6a; --red:#f7768e; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--page); color:var(--fg); font: 16px/1.55 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 44px 0 12px; padding-top: 20px; border-top: 1px solid var(--line); }
+  h3 { font-size: 16px; margin: 22px 0 6px; color: var(--gold); }
+  p, li { color: var(--fg); }
+  .lead { color: var(--muted); font-size: 17px; margin: 0 0 24px; }
+  .who { display:grid; gap:12px; grid-template-columns: 1fr 1fr; margin: 20px 0 8px; }
+  @media (max-width: 560px) { .who { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card b { display:block; margin-bottom: 4px; }
+  .card .muted { color: var(--muted); font-size: 14px; }
+  ol, ul { padding-left: 22px; } li { margin: 6px 0; }
+  code, kbd { font-family: var(--mono); font-size: 14px; background: #1b1c22; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  pre { background:#1b1c22; border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow:auto; font-family: var(--mono); font-size: 13.5px; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  .dl { display:flex; flex-wrap:wrap; gap:10px; margin: 10px 0 4px; }
+  .btn { display:inline-block; background: var(--accent); color:#0e0f11; font-weight:600; padding: 9px 14px; border-radius: 8px; }
+  .btn.alt { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  .note { border-left: 3px solid var(--gold); padding: 8px 12px; background: #1b1c22; border-radius: 0 8px 8px 0; margin: 14px 0; color: var(--fg); }
+  .ok { color: var(--green); } .warn { color: var(--gold); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; } td, th { text-align:left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Placeholder guild tools</h1>
+  <p class="lead">Two small pieces connect the game to the guild's Discord and officer sheet: an addon everyone can run, and a tray app one officer runs.</p>
+
+  <div class="who">
+    <div class="card"><b>Everyone who raids: the addon</b><span class="muted">PlaceholderSync adds a <em>Sheet</em> column to the loot council window so you can see who is in line for an item. It also records the guild bank when you open it.</span></div>
+    <div class="card"><b>One officer: the bridge</b><span class="muted">Placeholder Bridge sits in the tray, uploads the bank scan and the bank's own log to the server, and brings the sheet's loot data into the game. One PC per guild is enough.</span></div>
+  </div>
+
+  <h2 id="downloads">Downloads</h2>
+  <p class="muted" id="dl-status">Looking up the newest releases…</p>
+  <div class="dl" id="dl"></div>
+  <p class="muted" style="font-size:14px">All releases, with notes: <a href="https://github.com/tomtko/placeholder-sync/releases">github.com/tomtko/placeholder-sync/releases</a></p>
+
+  <h2 id="addon">The addon</h2>
+  <ol>
+    <li>Download the addon zip above. Its name is <code>PlaceholderSync-&lt;version&gt;.zip</code>.</li>
+    <li>Unzip it into your <b>World of Warcraft</b> folder for WoW Forever, the one called <code>_forever_</code>. The zip already contains the <code>Interface\AddOns\PlaceholderSync</code> path, so the folder ends up in the right place.<br><span class="muted">Typical location: <code>C:\Program Files (x86)\World of Warcraft\_forever_\</code>. For testing on retail, the same into <code>_retail_</code>.</span></li>
+    <li>Start the game, or type <code>/reload</code> if it is running. In chat, <code>/psync</code> shows the addon's status.</li>
+  </ol>
+  <p>That is all a raider needs. The Sheet column appears in RCLootCouncil or ForeverLoot as soon as the bridge officer has pushed loot data once.</p>
+
+  <h2 id="bridge">The bridge, for one officer</h2>
+  <ol>
+    <li>Download the installer above and run it. The app starts in the system tray and opens its window.</li>
+    <li>Open <b>Settings</b>. The server address is already filled in. Paste the <b>bridge token</b> you were given by the bot owner, then <b>Save</b>.<br><span class="muted">The token is shown once by the bot's <code>/setup start</code>. If it is lost, the bot owner runs <code>/setup rotate</code> for a new one.</span></li>
+    <li>In the game, open the guild bank, click through its tabs, close it and type <code>/reload</code>.</li>
+    <li>Back in the bridge, <b>Game accounts</b> lists your account once the addon has written its file, and the Overview shows the scan uploading. In Discord, <code>/gbank stock</code> shows the bank, and the sheet's Guild Bank tab fills in within seconds.</li>
+  </ol>
+  <p>From then on it is automatic: every bank visit followed by a <code>/reload</code> or logout uploads the scan and the bank's own transaction log. The bridge updates itself; by default it installs updates only while the game is closed.</p>
+
+  <div class="note" id="defender"><b>Windows Defender may warn about the installer.</b> The installer is not yet code-signed, and Defender's heuristics sometimes flag small unsigned installers as <code>Trojan:Win32/…!ml</code>. To check a file is the real one, compare its SHA-256 with the hash shown under Downloads above, using PowerShell: <code>Get-FileHash .\Placeholder.Bridge_x.y.z_x64-setup.exe</code>. Then choose <em>Allow</em> in Windows Security › Protection history.</div>
+
+  <h3>Two guilds on one PC</h3>
+  <p>If you also play in another guild that uses this bot, give that install its own token: Bridge › Game accounts › <em>Use another guild's token…</em>. Each install then uploads to its own guild and gets its own loot data.</p>
+
+  <h2 id="what">What gets uploaded</h2>
+  <table>
+    <tr><th>From</th><th>What</th><th>Where it goes</th></tr>
+    <tr><td>Guild bank visits</td><td>Tab contents, gold, and the bank's transaction log (who deposited or withdrew what)</td><td>Discord <code>/gbank</code>, the sheet's Guild Bank and Bank History tabs</td></tr>
+    <tr><td>Loot council</td><td>Awards from RCLootCouncil or ForeverLoot history</td><td>The sheet's Loot Log</td></tr>
+    <tr><td>Your characters</td><td>Name, realm, class, guild</td><td>The sheet's roster checks</td></tr>
+  </table>
+  <p>Only your own guild's data is recorded. The addon refuses another guild's bank, and the server refuses anything from a guild other than the one the token belongs to.</p>
+
+  <h2 id="trouble">If something does not look right</h2>
+  <ul>
+    <li><b>"this is X's bank, not Y's: not recording it"</b> in chat: you are in a different guild than the one the bridge serves. Expected on alts elsewhere.</li>
+    <li><b>Bridge says "Server rejected the token"</b>: the token was mistyped or rotated. Ask the bot owner for a fresh one.</li>
+    <li><b>No scan arrives</b>: open the bank, click each tab, close it, and <code>/reload</code>. The file is only written when the game saves it.</li>
+    <li><b>Something missing in game</b>: <code>/psync apicheck</code> lists any API the client lacks; send that output to the bot owner.</li>
+  </ul>
+
+  <footer>Addon source and issues: <a href="https://github.com/tomtko/placeholder-sync">github.com/tomtko/placeholder-sync</a></footer>
+</main>
+<script>
+(async () => {
+  const dl = document.getElementById("dl"), status = document.getElementById("dl-status"), parts = [], extra = [];
+  try {
+    const r = await fetch("https://api.github.com/repos/tomtko/placeholder-sync/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
+    if (r.ok) { const rel = await r.json(); const zip = rel.assets.find((a) => a.name.endsWith(".zip")); if (zip) parts.push(`<a class="btn" href="${zip.browser_download_url}">Addon ${rel.tag_name.replace(/^v/, "")} · ${zip.name}</a>`); }
+  } catch (e) { /* shown below */ }
+  try {
+    const r = await fetch("https://icons.placeholder-guild.com/bridge/latest.json", { cache: "no-store" });
+    if (r.ok) { const m = await r.json(); const w = m.platforms && (m.platforms["windows-x86_64-nsis"] || m.platforms["windows-x86_64"]); if (w) { parts.push(`<a class="btn alt" href="${w.url}">Bridge ${m.version} · Windows installer</a>`); if (m.sha256) extra.push(`Installer SHA-256: <code>${m.sha256}</code>`); } }
+  } catch (e) { /* shown below */ }
+  dl.innerHTML = parts.join("");
+  status.textContent = parts.length ? "Newest releases:" : "Could not look up the newest releases here; use the releases page below.";
+  for (const html of extra) { const p = document.createElement("p"); p.className = "muted"; p.style.fontSize = "13px"; p.innerHTML = html; dl.after(p); }
+})();
+</script>
+</body>
+</html>

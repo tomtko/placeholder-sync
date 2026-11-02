@@ -13,9 +13,9 @@ The addon has its own version (brand.json addonVersion); the desktop app uses ap
 import argparse, json, os, re, shutil, sys, zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "addon" / "src"
-DIST = ROOT / "addon" / "dist"
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+DIST = ROOT / "dist"
 WOW_DEFAULT = Path("/mnt/c/Program Files (x86)/World of Warcraft")
 
 

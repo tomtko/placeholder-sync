@@ -1,0 +1,18 @@
+name: Release
+# Tag v<addonVersion> (as in brand.json) and the zip is attached to a GitHub Release; the install page lists the newest one.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 build.py --version "${GITHUB_REF_NAME#v}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "PlaceholderSync ${{ github.ref_name }}"
+          body: "Unzip into your World of Warcraft folder (the zip contains Interface/AddOns/…). Works on _forever_ and _retail_. Install guide: https://tomtko.github.io/placeholder-sync/"
+          files: dist/*.zip

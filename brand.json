@@ -1,0 +1,8 @@
+{
+  "addon": "PlaceholderSync",
+  "addonVersion": "0.3.1",
+  "slash": "psync",
+  "guild": "Placeholder",
+  "serverUrl": "https://sync.placeholder-guild.com",
+  "repo": "tomtko/placeholder-sync"
+}
