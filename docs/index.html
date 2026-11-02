@@ -60,7 +60,7 @@
   <h2 id="bridge">The bridge, for one officer</h2>
   <ol>
     <li>Download the installer from <a href="#downloads">Downloads</a> above and run it. The app starts in the system tray and opens its window.</li>
-    <li>Open <b>Settings</b>. The server address is already filled in. Paste the <b>bridge token</b> you were given by the bot owner, then <b>Save</b>.<br><span class="muted">The token is shown once by the bot's <code>/setup start</code>. If it is lost, the bot owner runs <code>/setup rotate</code> for a new one.</span></li>
+    <li>Open <b>Guilds</b> and press <b>Link this PC</b>. Your browser opens a page on the guild server: sign in with Discord, tick the guilds this PC should serve, Approve. The app picks the result up by itself within a few seconds.<br><span class="muted">Only guilds where you are an officer, an administrator or the server owner are offered. No token to paste; if you were handed one anyway, Settings still accepts it.</span></li>
     <li>In the game, open the guild bank, click through its tabs, close it and type <code>/reload</code>.</li>
     <li>Back in the bridge, <b>Game accounts</b> lists your account once the addon has written its file, and the Overview shows the scan uploading. In Discord, <code>/gbank stock</code> shows the bank, and the sheet's Guild Bank tab fills in within seconds.</li>
   </ol>
@@ -69,7 +69,7 @@
   <div class="note" id="defender"><b>Windows Defender may warn about the installer.</b> The installer is not yet code-signed, and Defender's heuristics sometimes flag small unsigned installers as <code>Trojan:Win32/…!ml</code>. To check a file is the real one, compare its SHA-256 with the hash shown under Downloads above, using PowerShell: <code>Get-FileHash .\Placeholder.Bridge_x.y.z_x64-setup.exe</code>. Then choose <em>Allow</em> in Windows Security › Protection history.</div>
 
   <h3>Two guilds on one PC</h3>
-  <p>If you also play in another guild that uses this bot, give that install its own token: Bridge › Game accounts › <em>Use another guild's token…</em>. Each install then uploads to its own guild and gets its own loot data.</p>
+  <p>Tick both guilds when you link. Each WoW install is matched to the guild named in its addon file, so <code>_forever_</code> and <code>_retail_</code> can serve different guilds; Game accounts lets you pin an install to a guild if the match is not what you want. Unlinking a PC is done in the guild's Discord with <code>/settings devices</code>.</p>
 
   <h2 id="what">What gets uploaded</h2>
   <table>
@@ -83,7 +83,8 @@
   <h2 id="trouble">If something does not look right</h2>
   <ul>
     <li><b>"this is X's bank, not Y's: not recording it"</b> in chat: you are in a different guild than the one the bridge serves. Expected on alts elsewhere.</li>
-    <li><b>Bridge says "Server rejected the token"</b>: the token was mistyped or rotated. Ask the bot owner for a fresh one.</li>
+    <li><b>Bridge says "Server rejected the token"</b>: this PC was unlinked or the token was rotated. Guilds › Link this PC again.</li>
+    <li><b>"No guild to link"</b> on the approval page: you are not an officer in a Discord server that uses the bot. Ask for the officer role, then link again.</li>
     <li><b>No scan arrives</b>: open the bank, click each tab, close it, and <code>/reload</code>. The file is only written when the game saves it.</li>
     <li><b>Something missing in game</b>: <code>/psync apicheck</code> lists any API the client lacks; send that output to the bot owner.</li>
   </ul>
