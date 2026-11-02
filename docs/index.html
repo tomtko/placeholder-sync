@@ -40,7 +40,7 @@
 
   <div class="who">
     <div class="card"><b>Everyone who raids: the addon</b><span class="muted">PlaceholderSync adds a <em>Sheet</em> column to the loot council window so you can see who is in line for an item. It also records the guild bank when you open it.</span></div>
-    <div class="card"><b>One officer: the bridge</b><span class="muted">Placeholder Bridge sits in the tray, uploads the bank scan and the bank's own log to the server, and brings the sheet's loot data into the game. One PC per guild is enough.</span></div>
+    <div class="card"><b>The bridge: officers, and raiders who want to help</b><span class="muted">Placeholder Bridge sits in the tray, uploads the bank scan and the bank's own log whenever you visit the bank, and brings the sheet's loot data into the game. One officer is enough; every extra linked PC keeps the bank more current.</span></div>
   </div>
 
   <h2 id="downloads">Downloads</h2>
@@ -57,10 +57,11 @@
   </ol>
   <p>That is all a raider needs. The Sheet column appears in RCLootCouncil or ForeverLoot as soon as the bridge officer has pushed loot data once.</p>
 
-  <h2 id="bridge">The bridge, for one officer</h2>
+  <h2 id="bridge">The bridge</h2>
+  <p>Officers link as officers and get the full loot data. Raiders with a rank role can link too: their bank visits upload like an officer's, and their loot data comes without the officer prio layer.</p>
   <ol>
     <li>Download the installer from <a href="#downloads">Downloads</a> above and run it. The app starts in the system tray and opens its window.</li>
-    <li>Open <b>Guilds</b> and press <b>Link this PC</b>. Your browser opens a page on the guild server: sign in with Discord, tick the guilds this PC should serve, Approve. The app picks the result up by itself within a few seconds.<br><span class="muted">Only guilds where you are an officer, an administrator or the server owner are offered. Nothing to paste.</span></li>
+    <li>Open <b>Guilds</b> and press <b>Link this PC</b>. Your browser opens a page on the guild server: sign in with Discord, tick the guilds this PC should serve, Approve. The app picks the result up by itself within a few seconds.<br><span class="muted">Officers, administrators and the server owner link as officers; Raider, Trial and Social roles link as members. Nothing to paste.</span></li>
     <li>In the game, open the guild bank, click through its tabs, close it and type <code>/reload</code>.</li>
     <li>Back in the bridge, <b>Game accounts</b> lists your account once the addon has written its file, and the Overview shows the scan uploading. In Discord, <code>/gbank stock</code> shows the bank, and the sheet's Guild Bank tab fills in within seconds.</li>
   </ol>
@@ -84,7 +85,7 @@
   <ul>
     <li><b>"this is X's bank, not Y's: not recording it"</b> in chat: you are in a different guild than the one the bridge serves. Expected on alts elsewhere.</li>
     <li><b>Bridge says "Server rejected the token"</b>: this PC was unlinked or the token was rotated. Guilds › Link this PC again.</li>
-    <li><b>"No guild to link"</b> on the approval page: you are not an officer in a Discord server that uses the bot. Ask for the officer role, then link again.</li>
+    <li><b>"No guild to link"</b> on the approval page: you hold no officer or rank role in a Discord server that uses the bot. Ask an officer for your rank role, then link again.</li>
     <li><b>No scan arrives</b>: open the bank, click each tab, close it, and <code>/reload</code>. The file is only written when the game saves it.</li>
     <li><b>Something missing in game</b>: <code>/psync apicheck</code> lists any API the client lacks; send that output to the bot owner.</li>
   </ul>
