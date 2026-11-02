@@ -97,7 +97,8 @@
     if (r.ok) { const rel = await r.json(); const zip = rel.assets.find((a) => a.name.endsWith(".zip")); if (zip) parts.push(`<a class="btn" href="${zip.browser_download_url}">Addon ${rel.tag_name.replace(/^v/, "")} · ${zip.name}</a>`); }
   } catch (e) { /* shown below */ }
   try {
-    const r = await fetch("https://icons.placeholder-guild.com/bridge/latest.json", { cache: "no-store" });
+    let r = await fetch("https://get.placeholder-guild.com/bridge/latest.json", { cache: "no-store" }).catch(() => null);
+    if (!r || !r.ok) r = await fetch("https://icons.placeholder-guild.com/bridge/latest.json", { cache: "no-store" });
     if (r.ok) { const m = await r.json(); const w = m.platforms && (m.platforms["windows-x86_64-nsis"] || m.platforms["windows-x86_64"]); if (w) { parts.push(`<a class="btn alt" href="${w.url}">Bridge ${m.version} · Windows installer</a>`); if (m.sha256) extra.push(`Installer SHA-256: <code>${m.sha256}</code>`); } }
   } catch (e) { /* shown below */ }
   dl.innerHTML = parts.join("");
