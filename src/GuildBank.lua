@@ -1,6 +1,7 @@
 --[[
   GuildBank.lua: records the guild bank into <AddonName>DB.guildBank whenever the bank is opened.
 
+  After the scan the transaction log is copied too (see "Transaction log" below).
   The bank API only answers for a tab after QueryGuildBankTab(tab) has been acknowledged by
   GUILDBANKBAGSLOTS_CHANGED, so the scan walks the viewable tabs one at a time. While the window stays
   open, the tab the officer is looking at is re-read on every change, so moving items is captured too.
@@ -114,6 +115,7 @@ local function finishScan(complete)
   -- Tabs this character cannot view keep whatever an earlier scan (ours or a guildmate's, Sync.lua) held.
   NS.db.guildBank = NS.MergeBank(NS.db.guildBank, fresh)
   NS.pendingUpload = true
+  if frameOpen then C_Timer.After(0.2, function() pcall(NS.ReadBankLog) end) end
 
   local gb = NS.db.guildBank
   local hidden = 0
@@ -159,6 +161,7 @@ function NS.MergeBank(cur, inc)
     by = newestBy or newer.by,
     money = newer.money, complete = complete, tabs = tabs,
     sharedFrom = newer.sharedFrom, receivedAt = newer.receivedAt,
+    log = (cur and cur.log and (not inc.log or (cur.log.at or 0) > (inc.log.at or 0))) and cur.log or inc.log,
   }
 end
 
@@ -217,6 +220,84 @@ nextTab = function()
       end)
     end
   end)
+end
+
+-- Transaction log ------------------------------------------------------------------------------
+-- After each scan, copy the game's own log (the last 25 entries per tab, plus the money log) into the scan as
+-- guildBank.log. The backend aligns it with what it saw last time and writes only the new entries to Bank
+-- History, so nothing here needs to remember what was already sent. Same dance as the tabs: QueryGuildBankLog
+-- is answered by GUILDBANKLOG_UPDATE (or not at all when the client already had it, hence the timeout).
+local MONEY_LOG = (MAX_GUILDBANK_TABS or 8) + 1
+local LOG_TIMEOUT = 1.5
+local logRead
+
+local function agoOf(y, m, d, h) return { y = tonumber(y) or 0, m = tonumber(m) or 0, d = tonumber(d) or 0, h = tonumber(h) or 0 } end
+
+local function readLog(tab)
+  local out = {}
+  if tab == MONEY_LOG then
+    local n = (GetNumGuildBankMoneyTransactions and GetNumGuildBankMoneyTransactions()) or 0
+    for i = 1, n do
+      local ok, ty, who, amount, y, m, d, h = pcall(GetGuildBankMoneyTransaction, i)
+      if ok and ty then out[#out + 1] = { t = ty, who = who or "Unknown", c = tonumber(amount) or 0, ago = agoOf(y, m, d, h) } end
+    end
+  else
+    local n = (GetNumGuildBankTransactions and GetNumGuildBankTransactions(tab)) or 0
+    for i = 1, n do
+      local ok, ty, who, link, count, tab1, tab2, y, m, d, h = pcall(GetGuildBankTransaction, tab, i)
+      if ok and ty then
+        out[#out + 1] = {
+          t = ty, who = who or "Unknown", link = link,
+          item = link and tonumber(link:match("|Hitem:(%d+)")) or nil, name = link and link:match("%[(.-)%]") or nil,
+          n = tonumber(count) or 1, from = tonumber(tab1), to = tonumber(tab2), ago = agoOf(y, m, d, h),
+        }
+      end
+    end
+  end
+  return out
+end
+
+local logNext
+
+local function logAnswered()
+  if not logRead or not logRead.waiting then return end
+  local tab = logRead.waiting
+  logRead.waiting = nil
+  if logRead.timer then logRead.timer:Cancel() end
+  local entries = readLog(tab)
+  if tab == MONEY_LOG then logRead.out.money = entries
+  else logRead.out.tabs[#logRead.out.tabs + 1] = { tab = tab, e = entries } end
+  logNext()
+end
+
+logNext = function()
+  if not logRead then return end
+  logRead.pos = logRead.pos + 1
+  local tab = logRead.queue[logRead.pos]
+  if not tab then
+    local gb = NS.db and NS.db.guildBank
+    if gb then
+      gb.log = logRead.out
+      NS.pendingUpload = true
+    end
+    logRead = nil
+    return
+  end
+  logRead.waiting = tab
+  if not pcall(QueryGuildBankLog, tab) then logAnswered() return end
+  logRead.timer = C_Timer.NewTimer(LOG_TIMEOUT, function() if logRead and logRead.waiting == tab then logAnswered() end end)
+end
+
+function NS.ReadBankLog()
+  if logRead or not frameOpen or not QueryGuildBankLog then return end
+  local queue = {}
+  for i = 1, GetNumGuildBankTabs() or 0 do
+    local ok, _, _, isViewable = pcall(GetGuildBankTabInfo, i)
+    if ok and isViewable then queue[#queue + 1] = i end
+  end
+  queue[#queue + 1] = MONEY_LOG
+  logRead = { queue = queue, pos = 0, out = { at = time(), tabs = {}, money = {} } }
+  logNext()
 end
 
 function NS.StartScan(manual)
@@ -291,6 +372,10 @@ end
 local function onClosed()
   if not frameOpen then return end
   frameOpen = false
+  if logRead then
+    if logRead.timer then logRead.timer:Cancel() end
+    logRead = nil   -- a half-read log is dropped; the next visit reads it whole
+  end
   if scan then finishScan(false) end
   if NS.db and NS.db.guildBank then
     NS.db.guildBank.money = GetGuildBankMoney() or NS.db.guildBank.money
@@ -306,6 +391,7 @@ frame:RegisterEvent("GUILDBANKFRAME_OPENED")
 frame:RegisterEvent("GUILDBANKFRAME_CLOSED")
 frame:RegisterEvent("GUILDBANKBAGSLOTS_CHANGED")
 frame:RegisterEvent("GUILDBANK_UPDATE_MONEY")
+frame:RegisterEvent("GUILDBANKLOG_UPDATE")
 if GUILD_BANKER then
   frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
   frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
@@ -325,6 +411,8 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     elseif not scan then
       viewedTabChanged()
     end
+  elseif event == "GUILDBANKLOG_UPDATE" then
+    if logRead and logRead.waiting then logAnswered() end
   elseif event == "GUILDBANK_UPDATE_MONEY" then
     local gb = NS.db and NS.db.guildBank
     if gb and frameOpen then
