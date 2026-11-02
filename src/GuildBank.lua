@@ -228,7 +228,7 @@ end
 -- History, so nothing here needs to remember what was already sent. Same dance as the tabs: QueryGuildBankLog
 -- is answered by GUILDBANKLOG_UPDATE (or not at all when the client already had it, hence the timeout).
 local MONEY_LOG = (MAX_GUILDBANK_TABS or 8) + 1
-local LOG_TIMEOUT = 1.5
+local LOG_TIMEOUT = 3
 local logRead
 
 local function agoOf(y, m, d, h) return { y = tonumber(y) or 0, m = tonumber(m) or 0, d = tonumber(d) or 0, h = tonumber(h) or 0 } end
@@ -259,14 +259,25 @@ end
 
 local logNext
 
-local function logAnswered()
+local function logAnswered(timedOut)
   if not logRead or not logRead.waiting then return end
   local tab = logRead.waiting
-  logRead.waiting = nil
   if logRead.timer then logRead.timer:Cancel() end
   local entries = readLog(tab)
-  if tab == MONEY_LOG then logRead.out.money = entries
-  else logRead.out.tabs[#logRead.out.tabs + 1] = { tab = tab, e = entries } end
+  if timedOut and #entries == 0 and not logRead.retried[tab] then
+    -- The client holds nothing for this tab and the server has not answered yet: ask once more before giving up.
+    logRead.retried[tab] = true
+    logRead.timer = C_Timer.NewTimer(LOG_TIMEOUT, function() if logRead and logRead.waiting == tab then logAnswered(true) end end)
+    pcall(QueryGuildBankLog, tab)
+    return
+  end
+  logRead.waiting = nil
+  -- A read that never came back is left out of the copy (the game never forgets a tab's last 25 entries, so an
+  -- empty list is no answer, not an empty log): the backend then keeps its place in that tab's history.
+  if #entries > 0 then
+    if tab == MONEY_LOG then logRead.out.money = entries
+    else logRead.out.tabs[#logRead.out.tabs + 1] = { tab = tab, e = entries } end
+  end
   logNext()
 end
 
@@ -285,7 +296,7 @@ logNext = function()
   end
   logRead.waiting = tab
   if not pcall(QueryGuildBankLog, tab) then logAnswered() return end
-  logRead.timer = C_Timer.NewTimer(LOG_TIMEOUT, function() if logRead and logRead.waiting == tab then logAnswered() end end)
+  logRead.timer = C_Timer.NewTimer(LOG_TIMEOUT, function() if logRead and logRead.waiting == tab then logAnswered(true) end end)
 end
 
 function NS.ReadBankLog()
@@ -296,7 +307,7 @@ function NS.ReadBankLog()
     if ok and isViewable then queue[#queue + 1] = i end
   end
   queue[#queue + 1] = MONEY_LOG
-  logRead = { queue = queue, pos = 0, out = { at = time(), tabs = {}, money = {} } }
+  logRead = { queue = queue, pos = 0, retried = {}, out = { at = time(), tabs = {}, money = {} } }
   logNext()
 end
 
