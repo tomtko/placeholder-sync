@@ -123,7 +123,7 @@ local function finishScan(complete)
   local note = ""
   if not gb.complete then note = " (some items were still loading, open the bank again in a moment)" end
   if hidden > 0 then note = note .. (" (%d tab%s you cannot view, kept from earlier scans)"):format(hidden, hidden == 1 and "" or "s") end
-  NS.Print("bank saved: %s, %d items in %d tabs%s. It uploads at your next /reload or logout.",
+  NS.Notify("bank saved: %s, %d items in %d tabs%s. It uploads at your next /reload or logout.",
     NS.FormatMoney(gb.money), countItems(gb.tabs), #gb.tabs, note)
 end
 
@@ -371,11 +371,12 @@ local function onOpened()
   if NS.ForThisGuild and not NS.ForThisGuild() then
     if not saidOtherGuild then
       saidOtherGuild = true
-      NS.Print("this is %s's bank, not %s's: not recording it.", GetGuildInfo("player") or "another guild", NS.GuildName() or "our guild")
+      NS.Notify("this is %s's bank, not %s's: not recording it.", GetGuildInfo("player") or "another guild", NS.GuildName() or "our guild")
     end
     return
   end
   frameOpen = true
+  if NS.Option and NS.Option("autoscan") == false then return end -- "/psync autoscan off": only "/psync scan" records the bank
   -- Let the Blizzard frame issue its own first query, then start ours.
   C_Timer.After(0.3, function() if frameOpen then NS.StartScan(false) end end)
 end

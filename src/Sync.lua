@@ -185,7 +185,7 @@ SETS.L = {
   apply = function(ver, gen, p, sender)
     NS.db.lootShared = { rev = ver, generatedAt = gen, receivedAt = time(), from = sender, payload = p }
     if NS.Loot then NS.Loot.Reset() end
-    NS.Print("loot sheet rev %d received from %s (%d items). It shows in the council window right away.", ver, short(sender), countKeys(p.items))
+    NS.Notify("loot sheet rev %d received from %s (%d items). It shows in the council window right away.", ver, short(sender), countKeys(p.items))
   end,
   forget = function()
     if NS.db then NS.db.lootShared = nil end
@@ -217,7 +217,7 @@ SETS.P = {
     NS.db.lootShared.payload.prioRanks = p.prioRanks
     NS.db.lootShared.prioRev = ver
     NS.Loot.Reset()
-    NS.Print("officer data for loot sheet rev %d received from %s.", ver, short(sender))
+    NS.Notify("officer data for loot sheet rev %d received from %s.", ver, short(sender))
   end,
   forget = function() end, -- lives inside lootShared, dropped with it
 }
@@ -351,7 +351,7 @@ local function sendData(kind, ch, to)
   local sd = ks.seenData[ch]
   if sd and sd.ver >= ver and sd.at > now - QUIET then return end -- somebody else already answered
   local b64, err = encodedData(kind)
-  if not b64 then NS.Print("could not share the %s (%s).", SETS[kind].name, err) return end
+  if not b64 then NS.Notify("could not share the %s (%s).", SETS[kind].name, err) return end
   local _, gen = SETS[kind].current()
   ks.lastSend[ch] = now
   state.sent = state.sent + 1
@@ -489,6 +489,7 @@ end
 -- Lifecycle -------------------------------------------------------------------------------------
 
 function Sync.Available()
+  if NS.Option and NS.Option("share") == false then return false, "turned off with " .. (NS.SLASH or "/psync") .. " share off" end
   if not Ace then return false, "AceComm did not load" end
   if not EU or not EU.SerializeCBOR or not EU.DeserializeCBOR or not EU.CompressString or not EU.DecompressString or not EU.EncodeBase64 or not EU.DecodeBase64 then
     return false, "this client has no C_EncodingUtil"
@@ -563,7 +564,7 @@ end
 function Sync.Start()
   if state.started then return end
   local ok, why = Sync.Available()
-  if not ok then NS.Print("in-game sharing is off: %s.", why) return end
+  if not ok then NS.Notify("in-game sharing is off: %s.", why) return end
   state.started = true
   me = NS.PlayerKey()
   Ace:RegisterComm(PREFIX, onComm)

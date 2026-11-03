@@ -63,7 +63,7 @@ local function setup()
     end,
   }, "roll", "after") -- last column, after Roll (where WowUtils puts its own)
   if not ok then
-    PS.Print("RCLootCouncil column could not be added: %s", tostring(err))
+    PS.Notify("RCLootCouncil column could not be added: %s", tostring(err))
     return true
   end
   return true

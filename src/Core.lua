@@ -12,12 +12,14 @@
       lootShared = { rev, generatedAt, receivedAt, from, payload },          -- loot sheet copy from another officer (Sync.lua)
       lootAwards = { [uid] = { src, id, at, to, itemId, name, response, ... } }, -- council awards for the sheet's Loot Log (LootLog.lua)
       _apiCheck  = { "GetGuildBankItemLink", ... },                          -- API names missing on this client
+      options    = { chat = false, autoscan = true, share = true },           -- /psync settings, account-wide
     }
 ]]
 local ADDON, NS = ...
 local SLASH = "/psync" -- @brand:slash
 
 NS.ADDON = ADDON
+NS.SLASH = SLASH
 NS.DB_NAME = ADDON .. "DB"
 NS.DB_VERSION = 1
 -- The load-on-demand modules (<Addon>_RCLC, <Addon>_FLC) reach us through this global.
@@ -28,9 +30,44 @@ NS.VERSION = (getMeta and getMeta(ADDON, "Version")) or "dev"
 
 -- Chat output -------------------------------------------------------------------------------
 
+-- Print: the reply to something the player typed. Always shown.
 function NS.Print(msg, ...)
   if select("#", ...) > 0 then msg = msg:format(...) end
   print("|cff7fd5ff" .. ADDON .. ":|r " .. msg)
+end
+
+-- Notify: something that happened on its own (a scan saved, loot data received, a module that failed to start).
+-- Quiet unless "/psync chat on"; the last few are kept so "/psync" can show them.
+local notices = {}
+function NS.Notify(msg, ...)
+  if select("#", ...) > 0 then msg = msg:format(...) end
+  table.insert(notices, 1, { at = time(), text = msg })
+  notices[6] = nil
+  if NS.Option("chat") then NS.Print(msg) end
+end
+function NS.Notices() return notices end
+
+-- Settings ------------------------------------------------------------------------------------
+-- Account-wide, in the SavedVariables. Missing keys take the default, so new settings need no migration.
+
+local OPTION_DEFAULTS = { chat = false, autoscan = true, share = true }
+local OPTION_HELP = {
+  chat = "print a line when a bank scan is saved or loot data arrives",
+  autoscan = "scan the guild bank by itself when you open it (off: only %s scan)",
+  share = "share the loot sheet and bank scans with guildmates in game (a change applies after /reload)",
+}
+local OPTION_ORDER = { "chat", "autoscan", "share" }
+
+function NS.Option(key)
+  local o = NS.db and NS.db.options
+  if o and o[key] ~= nil then return o[key] end
+  return OPTION_DEFAULTS[key]
+end
+
+function NS.SetOption(key, value)
+  if not NS.db then return end
+  if type(NS.db.options) ~= "table" then NS.db.options = {} end
+  NS.db.options[key] = value
 end
 
 function NS.FormatMoney(copper)
@@ -78,6 +115,7 @@ function NS.InitDB()
   db.dbVersion = NS.DB_VERSION
   if type(db.characters) ~= "table" then db.characters = {} end
   if type(db._apiCheck) ~= "table" then db._apiCheck = {} end
+  if type(db.options) ~= "table" then db.options = {} end
   if type(db.guildBank) ~= "table" then db.guildBank = nil end
   db.meta = clientMeta()
   NS.db = db
@@ -188,6 +226,29 @@ local function status()
   end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
+  local last = notices[1]
+  if last then NS.Print("last notice %s: %s", date("%H:%M", last.at), last.text) end
+  local set = {}
+  for _, k in ipairs(OPTION_ORDER) do set[#set + 1] = k .. " " .. (NS.Option(k) and "on" or "off") end
+  NS.Print("settings: %s.  %s help lists them.", table.concat(set, ", "), SLASH)
+end
+
+local function help()
+  NS.Print("%s  |  %s scan  |  %s sync  |  %s awards  |  %s forget  |  %s apicheck  |  %s reload", SLASH, SLASH, SLASH, SLASH, SLASH, SLASH, SLASH)
+  for _, k in ipairs(OPTION_ORDER) do
+    NS.Print("%s %s on|off  (%s): %s", SLASH, k, NS.Option(k) and "on" or "off", OPTION_HELP[k]:format(SLASH))
+  end
+end
+
+local function setOption(key, arg)
+  local value
+  if arg == "on" or arg == "yes" or arg == "1" then value = true
+  elseif arg == "off" or arg == "no" or arg == "0" then value = false
+  elseif arg == "" or arg == nil then value = not NS.Option(key)
+  else NS.Print("%s %s on|off", SLASH, key) return end
+  NS.SetOption(key, value)
+  NS.Print("%s %s.%s", key, value and "on" or "off", (key == "share" and not value) and " Applies after /reload." or "")
+  if key == "share" and value and NS.Sync and NS.Sync.Start then pcall(NS.Sync.Start) end
 end
 
 local key = ADDON:upper():gsub("[^%w]", "")
@@ -216,8 +277,11 @@ SlashCmdList[key] = function(msg)
     end
   elseif msg == "" or msg == "status" then
     status()
+  elseif OPTION_DEFAULTS[msg:match("^(%S+)") or ""] ~= nil then
+    local key, arg = msg:match("^(%S+)%s*(.*)$")
+    setOption(key, arg)
   else
-    NS.Print("%s  |  %s reload  |  %s scan  |  %s sync  |  %s forget  |  %s apicheck", SLASH, SLASH, SLASH, SLASH, SLASH, SLASH)
+    help()
   end
 end
 
@@ -234,7 +298,7 @@ function NS.StartCouncilColumns()
     if not started[key] and mod.addon and isLoaded(mod.addon) then
       started[key] = true
       local ok, err = pcall(mod.Start)
-      if not ok then NS.Print("%s column failed to start: %s", key, tostring(err)) end
+      if not ok then NS.Notify("%s column failed to start: %s", key, tostring(err)) end
     end
   end
 end
@@ -259,11 +323,11 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     pcall(NS.RecordCharacter)
     if NS.Sync then
       local ok, err = pcall(NS.Sync.Start)
-      if not ok then NS.Print("sharing failed to start: %s", tostring(err)) end
+      if not ok then NS.Notify("sharing failed to start: %s", tostring(err)) end
     end
     if NS.LootLog then pcall(NS.LootLog.Start) end
     if #missing > 0 then
-      NS.Print("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
+      NS.Notify("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
     end
   elseif event == "PLAYER_LOGOUT" then
     if NS.db then
