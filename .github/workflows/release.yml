@@ -14,5 +14,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           name: "PlaceholderSync ${{ github.ref_name }}"
-          body: "Unzip into your World of Warcraft folder (the zip contains Interface/AddOns/…). Works on _forever_ and _retail_. Install guide: https://tomtko.github.io/placeholder-sync/"
+          body: "Unzip into World of Warcraft\\_forever_\\Interface\\AddOns (the zip holds the PlaceholderSync folder), or install from CurseForge. Install guide: https://tomtko.github.io/placeholder-sync/"
           files: dist/*.zip

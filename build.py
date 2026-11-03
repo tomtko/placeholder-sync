@@ -68,7 +68,7 @@ def main() -> int:
         for folder, src in [(addon, stage), *modules.items()]:
             for f in sorted(src.rglob("*")):
                 if f.is_file():
-                    z.write(f, f"Interface/AddOns/{folder}/{f.relative_to(src)}")
+                    z.write(f, f"{folder}/{f.relative_to(src)}")  # addon folder at the zip root, as CurseForge requires
     print(f"built {zip_path.relative_to(ROOT)}  ({addon} v{version}, /{slash}, modules: {', '.join(modules) or 'none'})")
 
     if args.install:
