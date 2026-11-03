@@ -262,8 +262,11 @@ local logNext
 local function logAnswered(timedOut)
   if not logRead or not logRead.waiting then return end
   local tab = logRead.waiting
-  if logRead.timer then logRead.timer:Cancel() end
   local entries = readLog(tab)
+  -- GUILDBANKLOG_UPDATE fires for any tab, including a late answer to an earlier query. Nothing for our tab yet
+  -- means this was not our answer: keep waiting, the timer decides.
+  if #entries == 0 and not timedOut then return end
+  if logRead.timer then logRead.timer:Cancel() end
   if timedOut and #entries == 0 and not logRead.retried[tab] then
     -- The client holds nothing for this tab and the server has not answered yet: ask once more before giving up.
     logRead.retried[tab] = true
