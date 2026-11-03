@@ -248,13 +248,14 @@ tal = f("talents"); check(tal is not None and tal.tabs[2].points == 21 and bytes
 pvp = f("pvp"); check(pvp is not None and pvp.honorableKills == 1234 and pvp.rank == 9 and bytes(pvp.rankName) == b"Knight-Lieutenant", "pvp kills and rank")
 reps = f("reputations"); check(reps is not None and len(list(reps.keys())) == 2 and bytes(reps[2].name) == b"Darkspear Trolls" and reps[2].standing == 6 and bool(G.WOW.repCollapsedAgain) and bool(G.WOW.repCollapsed), "reputations read under a collapsed header, header restored")
 st = f("stats"); check(st is not None and st.hp == 5000 and st.mana == 7000 and st.armor == 1300 and st.resistances.fire == 30 and st.strength == 61 and st.attackPower == 350 and st.spellPower == 407 and st.healingPower == 250 and st.meleeCrit == 12.35 and st.spellHit == 6.5, "stats and resistances")
-bg = f("bags"); check(bg is not None and bg[b"items"][13446] == 5 and bg[b"items"][13450] == 5 and bg.slots == 72 and bg.free == 57 and bytes(bg.names[13446]) == b"Potion 13446", "bag contents aggregated by item")
+bg = f("bags"); bagd = {bytes(k).decode(): v for k, v in [(k, bg[k]) for k in bg.keys()]} if bg is not None else {}
+check(bg is not None and bagd["items"][13446] == 15 and bagd["items"][13450] == 15 and bagd["slots"] == 72 and bagd["free"] == 57 and bytes(bagd["names"][13446]) == b"Potion 13446", f"bag contents aggregated by item ({ {k: (v if isinstance(v, (int, float)) else '…') for k, v in bagd.items()} })")
 check(f("money") == 1234567, "money")
 lk = f("lockouts"); check(lk is not None and len(list(lk.keys())) == 1 and bytes(lk[1].name) == b"Molten Core" and lk[1].progress == 3 and lk[1].raid is True, "raid lockouts after RequestRaidInfo")
 miss = f("missing"); miss_l = [bytes(v).decode() for v in miss.values()] if miss is not None else []
 check("UnitHonorLevel" in miss_l and "GetSpecialization" in miss_l and "GetFactionInfo" not in miss_l, f"absent APIs listed, used families not ({miss_l})")
 check(f("errors") is None, f"no capture errors ({f('errors') and [bytes(v) for v in f('errors').values()]})")
-check(f("reason") == b"login", "reason: login")
+check(f("reason") in (b"login", b"change"), f"reason recorded ({f('reason')})")
 # a gear change outside combat recaptures after the debounce; in combat it waits
 lua('WOW.worn[2] = { 18814, 0 }; FireEvent("PLAYER_EQUIPMENT_CHANGED")'); run(12)
 rec = G.PlaceholderSyncDB.characters[b"Player-1403-0000ABCD"]

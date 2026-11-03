@@ -373,7 +373,7 @@ function Char.Capture(reason)
   if not guid then return nil end
   if type(db.characters) ~= "table" then db.characters = {} end
   capturing = true
-  missing = {}
+  missing, absent = {}, {}
   local rec = {}
   local parts = { identity, gear, professions, talents, pvp, reputations, stats, bags, lockouts, function(r) r.money = first("GetMoney") end }
   local failed = {}
