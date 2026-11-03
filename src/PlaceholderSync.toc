@@ -15,5 +15,6 @@ GuildBank.lua
 LootData.lua
 Sync.lua
 LootLog.lua
+Character.lua
 Council_RCLC.lua
 Council_FLC.lua

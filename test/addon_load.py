@@ -116,6 +116,63 @@ function ACE:RegisterComm(prefix, fn) self.handlers[prefix] = fn end
 function ACE:SendCommMessage(prefix, text, dist, target, prio) py_send(text, dist, target or "") end
 function LibStub(name, silent) if name == "AceComm-3.0" then return ACE end return nil end
 ACECOMM = ACE
+-- the character sheet
+NUM_BAG_SLOTS = 4
+CR_HIT_MELEE, CR_HIT_SPELL, CR_HASTE_MELEE, CR_DEFENSE_SKILL = 6, 8, 18, 2
+WOW_PROJECT_CAMELOT = 1
+function UnitRace() return "Orc", "Orc", 2 end
+function UnitFactionGroup() return "Horde", "Horde" end
+function UnitSex() return 2 end
+WOW.worn = { [1] = { 250224, 2583 }, [2] = { 274497, 0 }, [5] = { 19145, 1891 }, [16] = { 17182, 2564 } }
+function GetInventoryItemLink(u, slot) local w = WOW.worn[slot] if not w then return nil end return "|cffa335ee|Hitem:" .. w[1] .. ":" .. w[2] .. ":0:0:0:0:0:0:60:::::|h[Worn " .. w[1] .. "]|h|r" end
+function GetInventoryItemQuality(u, slot) return WOW.worn[slot] and 4 or nil end
+function GetInventoryItemID(u, slot) return WOW.worn[slot] and WOW.worn[slot][1] or nil end
+C_Item = { GetDetailedItemLevelInfo = function(link) return 115, false, 115 end }
+function GetAverageItemLevel() return 110.5, 108.25 end
+function GetProfessions() return 1, 2, nil, 4, 5, 6 end
+function GetProfessionInfo(i) local n = { "Tailoring", "Enchanting", nil, "Fishing", "Cooking", "First Aid" } return n[i], 1, 300 - i, 300, 0, 0, 100 + i, 0 end
+WOW.skillHeaders = { [1] = { collapsed = true } }
+WOW.skillLines = { { "Professions", true }, { "Tailoring", false, 300, 300 }, { "Weapon Skills", true }, { "Daggers", false, 290, 300 } }
+function GetNumSkillLines() local n = 0 for i, l in ipairs(WOW.skillLines) do if l[2] then n = n + 1 elseif not WOW.skillHeaders[1].collapsed or i > 2 then n = n + 1 end end return n end
+function GetSkillLineInfo(i) local vis = {} for j, l in ipairs(WOW.skillLines) do if l[2] or not WOW.skillHeaders[1].collapsed or j > 2 then vis[#vis + 1] = l end end local l = vis[i] if not l then return nil end return l[1], l[2], not WOW.skillHeaders[1].collapsed, l[3], 0, 0, l[4] end
+function ExpandSkillHeader(i) WOW.skillHeaders[1].collapsed = false end
+function CollapseSkillHeader(i) WOW.skillHeaders[1].collapsed = true WOW.skillCollapsedAgain = true end
+function GetNumTalentTabs() return 3 end
+function GetTalentTabInfo(tab) return ({ "Affliction", "Demonology", "Destruction" })[tab], "Interface\\Icons\\x", ({ 7, 21, 33 })[tab] end
+function GetNumTalents(tab) return 2 end
+function GetTalentInfo(tab, i) return "Talent " .. tab .. "." .. i, "Interface\\Icons\\y", i, 2, i == 1 and 5 or 0, 5 end
+function GetActiveTalentGroup() return 1 end
+function GetPVPLifetimeStats() return 1234, 2 end
+function UnitPVPRank() return 9 end
+function GetPVPRankInfo(rank) return "Knight-Lieutenant", 5 end
+WOW.repCollapsed = true
+local REPS = { { id = 1, name = "Classic", header = true }, { id = 530, name = "Darkspear Trolls", standing = 6, value = 9000, min = 9000, max = 21000, child = true } }
+C_Reputation = {
+  GetNumFactions = function() return WOW.repCollapsed and 1 or 2 end,
+  GetFactionDataByIndex = function(i) local r = REPS[i] if not r then return nil end return { factionID = r.id, name = r.name, reaction = r.standing, currentStanding = r.value, currentReactionThreshold = r.min, nextReactionThreshold = r.max, isHeader = r.header or false, isCollapsed = r.header and WOW.repCollapsed or false, isChild = r.child or false } end,
+  ExpandFactionHeader = function(i) WOW.repCollapsed = false end,
+  CollapseFactionHeader = function(i) WOW.repCollapsed = true WOW.repCollapsedAgain = true end,
+}
+function UnitHealthMax() return 5000 end
+function UnitPowerType() return 0 end
+function UnitPowerMax(u, p) return 7000 end
+function UnitArmor() return 1200, 1300, 1200, 100, 0 end
+function UnitResistance(u, i) return 10 * i, 15 * i, 5 * i, 0 end
+function UnitStat(u, i) return 50 + i, 60 + i, 10, 0 end
+function UnitAttackPower() return 300, 50, 0 end
+function GetSpellBonusDamage(school) return 400 + school end
+function GetSpellBonusHealing() return 250 end
+function GetCritChance() return 12.3456 end
+function GetSpellCritChance(school) return 9.87 end
+function GetCombatRatingBonus(cr) return cr == 8 and 6.5 or 1.25 end
+function GetMoney() return 1234567 end
+C_Container = {
+  GetContainerNumSlots = function(bag) return bag == 0 and 16 or 14 end,
+  GetContainerItemInfo = function(bag, slot) if slot > 3 then return nil end local id = 13446 + bag return { itemID = id, stackCount = 5, hyperlink = "|cffffffff|Hitem:" .. id .. "::::::::60:::::|h[Potion " .. id .. "]|h|r" } end,
+}
+function GetNumSavedInstances() return WOW.raidInfo and 1 or 0 end
+function GetSavedInstanceInfo(i) return "Molten Core", 12345, 500000, 9, true, false, 0, true, 40, "40 Player", 10, 3 end
+function RequestRaidInfo() C_Timer.After(0.5, function() WOW.raidInfo = true FireEvent("UPDATE_INSTANCE_INFO") end) end
 -- the fake guild bank
 function GetNumGuildBankTabs() return #WOW.tabs end
 function GetGuildBankTabInfo(i) local t = WOW.tabs[i] if not t then return nil end return t.name, 1, t.viewable ~= false end
@@ -177,12 +234,46 @@ check(G.PlaceholderSyncDB is not None, "SavedVariables table created")
 check(not printed, f"nothing printed at login by default ({printed})")
 check(any(d == "GUILD" for _, d in sent), "announced on guild chat after login")
 
+print("== character capture")
+db0 = G.PlaceholderSyncDB
+rec = db0.characters[b"Player-1403-0000ABCD"]
+check(rec is not None and rec.gear is not None, "full record captured a few seconds after login")
+def f(k): return rec[k.encode()] if rec is not None else None
+check(f("name") == b"Fluffys" and f("class") == b"WARLOCK" and f("race") == b"Orc" and f("faction") == b"Horde" and f("level") == 60 and f("guildRank") == b"Officer" and f("flavor") == b"CAMELOT", "identity fields")
+gear = f("gear"); check(gear is not None and len(list(gear.keys())) == 4 and gear[1].id == 250224 and gear[1].enchant == 2583 and gear[1].ilvl == 115 and gear[1].quality == 4 and gear[2].enchant is None and bytes(gear[16].name) == b"Worn 17182", "gear: ids, enchants, ilvl, quality, names")
+check(f("avgIlvl") == 110.5 and f("avgIlvlEquipped") == 108.25, "average item level")
+prof = f("professions"); check(prof is not None and bytes(prof.primary1.name) == b"Tailoring" and prof.primary1.skill == 299 and bytes(prof.firstAid.name) == b"First Aid" and prof.archaeology is None, "professions by slot")
+skills = f("skills"); check(skills is not None and len(list(skills.keys())) == 4 and bool(G.WOW.skillCollapsedAgain), "skill lines read with the collapsed header opened and closed again")
+tal = f("talents"); check(tal is not None and tal.tabs[2].points == 21 and bytes(tal.tabs[3].name) == b"Destruction" and len(list(tal.talents.keys())) == 6 and tal.talents[1].rank == 5 and tal.activeGroup == 1, "talent tabs, points and ranks")
+pvp = f("pvp"); check(pvp is not None and pvp.honorableKills == 1234 and pvp.rank == 9 and bytes(pvp.rankName) == b"Knight-Lieutenant", "pvp kills and rank")
+reps = f("reputations"); check(reps is not None and len(list(reps.keys())) == 2 and bytes(reps[2].name) == b"Darkspear Trolls" and reps[2].standing == 6 and bool(G.WOW.repCollapsedAgain) and bool(G.WOW.repCollapsed), "reputations read under a collapsed header, header restored")
+st = f("stats"); check(st is not None and st.hp == 5000 and st.mana == 7000 and st.armor == 1300 and st.resistances.fire == 30 and st.strength == 61 and st.attackPower == 350 and st.spellPower == 407 and st.healingPower == 250 and st.meleeCrit == 12.35 and st.spellHit == 6.5, "stats and resistances")
+bg = f("bags"); check(bg is not None and bg[b"items"][13446] == 5 and bg[b"items"][13450] == 5 and bg.slots == 72 and bg.free == 57 and bytes(bg.names[13446]) == b"Potion 13446", "bag contents aggregated by item")
+check(f("money") == 1234567, "money")
+lk = f("lockouts"); check(lk is not None and len(list(lk.keys())) == 1 and bytes(lk[1].name) == b"Molten Core" and lk[1].progress == 3 and lk[1].raid is True, "raid lockouts after RequestRaidInfo")
+miss = f("missing"); miss_l = [bytes(v).decode() for v in miss.values()] if miss is not None else []
+check("UnitHonorLevel" in miss_l and "GetSpecialization" in miss_l and "GetFactionInfo" not in miss_l, f"absent APIs listed, used families not ({miss_l})")
+check(f("errors") is None, f"no capture errors ({f('errors') and [bytes(v) for v in f('errors').values()]})")
+check(f("reason") == b"login", "reason: login")
+# a gear change outside combat recaptures after the debounce; in combat it waits
+lua('WOW.worn[2] = { 18814, 0 }; FireEvent("PLAYER_EQUIPMENT_CHANGED")'); run(12)
+rec = G.PlaceholderSyncDB.characters[b"Player-1403-0000ABCD"]
+check(rec.gear[2].id == 18814 and rec.reason == b"change", "equipment change recaptured after the debounce")
+lua('WOW.combat = true; WOW.worn[2] = { 19379, 0 }; FireEvent("PLAYER_EQUIPMENT_CHANGED")'); run(25)
+rec = G.PlaceholderSyncDB.characters[b"Player-1403-0000ABCD"]
+check(rec.gear[2].id == 18814, "no capture during combat")
+lua('WOW.combat = false'); run(12)
+rec = G.PlaceholderSyncDB.characters[b"Player-1403-0000ABCD"]
+check(rec.gear[2].id == 19379, "captured once combat ended")
+out = slash("capture"); check(out and out[0].startswith("PlaceholderSync: character data: 4 items worn (ilvl 108)"), f"/psync capture ({out})")
+
 print("== slash commands")
 out = slash("")
 check(any("no guild bank scan yet" in l for l in out), "status says no scan yet")
 check(any("settings: chat off, autoscan on, share on" in l for l in out), "status lists the settings with defaults")
 check(any("serving guild Placeholder" in l for l in out), "status names the guild from the bridge data")
-out = slash("help"); check(len(out) == 4 and any("chat on|off" in l for l in out), "help lists commands and three settings")
+check(any(l.startswith("PlaceholderSync: character data: ") for l in out), "status has the character data line")
+out = slash("help"); check(len(out) == 4 and any("chat on|off" in l for l in out) and "capture" in out[0], "help lists commands and three settings")
 out = slash("chat on"); check(out == ["PlaceholderSync: chat on."], f"chat on confirms ({out})")
 out = slash("chat"); check(out == ["PlaceholderSync: chat off."], "bare chat toggles back")
 out = slash("autoscan off"); check(out and "autoscan off" in out[0], "autoscan off")

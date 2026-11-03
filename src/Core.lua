@@ -8,7 +8,7 @@
       dbVersion  = 1,
       meta       = { addonVersion, client, interface, flavor, savedAt },
       guildBank  = { guild, realm, by, at, money, complete, tabs = { { index, name, icon, items = { ... } } } },
-      characters = { [guid] = { name, realm, class, level, updatedAt } },   -- identity only for now
+      characters = { [guid] = { name, realm, class, level, gear, professions, talents, ... } }, -- Character.lua
       lootShared = { rev, generatedAt, receivedAt, from, payload },          -- loot sheet copy from another officer (Sync.lua)
       lootAwards = { [uid] = { src, id, at, to, itemId, name, response, ... } }, -- council awards for the sheet's Loot Log (LootLog.lua)
       _apiCheck  = { "GetGuildBankItemLink", ... },                          -- API names missing on this client
@@ -124,9 +124,13 @@ end
 
 -- Identity of the logged-in character. Gear and the rest come later; this is enough for the
 -- backend to know who runs the addon and who scanned the bank.
-function NS.RecordCharacter()
+function NS.RecordCharacter(reason)
   local db = NS.db
   if not db then return end
+  if reason ~= "identity" and NS.Character and NS.Character.Capture then
+    local ok, rec = pcall(NS.Character.Capture, reason or "logout")
+    if ok and rec then return end
+  end
   local ok, guid = pcall(UnitGUID, "player")
   if not ok or not guid then return end
   local _, class = UnitClass("player")
@@ -224,6 +228,7 @@ local function status()
     local n, week = NS.LootLog.Count()
     NS.Print("%d council award%s recorded for the Loot Log (%d this week).", n, n == 1 and "" or "s", week)
   end
+  if NS.Character then NS.Print(NS.Character.Summary() .. ".") end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
   local last = notices[1]
@@ -234,7 +239,7 @@ local function status()
 end
 
 local function help()
-  NS.Print("%s  |  %s scan  |  %s sync  |  %s awards  |  %s forget  |  %s apicheck  |  %s reload", SLASH, SLASH, SLASH, SLASH, SLASH, SLASH, SLASH)
+  NS.Print("%s  |  %s scan  |  %s capture  |  %s sync  |  %s awards  |  %s forget  |  %s apicheck  |  %s reload", SLASH, SLASH, SLASH, SLASH, SLASH, SLASH, SLASH, SLASH)
   for _, k in ipairs(OPTION_ORDER) do
     NS.Print("%s %s on|off  (%s): %s", SLASH, k, NS.Option(k) and "on" or "off", OPTION_HELP[k]:format(SLASH))
   end
@@ -269,6 +274,11 @@ SlashCmdList[key] = function(msg)
     if NS.Sync then NS.Sync.Forget() end
   elseif msg == "debug" then
     if NS.Sync then NS.Sync.ToggleDebug() end
+  elseif msg == "capture" then
+    if NS.Character then
+      local rec = NS.Character.Capture("manual")
+      NS.Print(rec and (NS.Character.Summary() .. ". It uploads at your next /reload or logout.") or "could not capture (not logged in?).")
+    end
   elseif msg == "awards" then
     if NS.LootLog then
       local n = NS.LootLog.Sweep() or 0
@@ -320,19 +330,20 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     if not NS.db then NS.InitDB() end
     NS.StartCouncilColumns()
     local missing = NS.ApiCheck()
-    pcall(NS.RecordCharacter)
+    pcall(NS.RecordCharacter, "identity") -- the full capture follows a few seconds later (Character.lua)
     if NS.Sync then
       local ok, err = pcall(NS.Sync.Start)
       if not ok then NS.Notify("sharing failed to start: %s", tostring(err)) end
     end
     if NS.LootLog then pcall(NS.LootLog.Start) end
+    if NS.Character then pcall(NS.Character.Start) end
     if #missing > 0 then
       NS.Notify("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
     end
   elseif event == "PLAYER_LOGOUT" then
     if NS.db then
       NS.db.meta = clientMeta()
-      pcall(NS.RecordCharacter)
+      pcall(NS.RecordCharacter, "logout")
       if NS.LootLog then pcall(NS.LootLog.Sweep) end
     end
   end

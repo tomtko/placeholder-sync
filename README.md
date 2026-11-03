@@ -1,7 +1,7 @@
 # PlaceholderSync
 
 The World of Warcraft addon half of the Placeholder guild tools. It records the guild bank and its transaction log
-whenever the bank is opened, keeps your characters in the guild roster, and copies loot council awards (RCLootCouncil
+whenever the bank is opened, records your characters in full (gear, professions, talents, reputations, stats, bags, lockouts) for the roster and armory tabs, and copies loot council awards (RCLootCouncil
 and ForeverLoot) for the sheet's Loot Log, so the officer running the bridge app can upload them for the guild's Discord
 bot and sheet.
 
