@@ -1,9 +1,9 @@
 # PlaceholderSync
 
-The World of Warcraft addon half of the Placeholder guild tools. It adds a **Sheet** column to the loot council window
-(RCLootCouncil and ForeverLoot) showing who is in line for an item on the officers' sheet, records the guild bank and its
-transaction log whenever the bank is opened, and copies loot council awards, so the officer running the bridge app can
-upload them for the guild's Discord bot and sheet.
+The World of Warcraft addon half of the Placeholder guild tools. It records the guild bank and its transaction log
+whenever the bank is opened, keeps your characters in the guild roster, and copies loot council awards (RCLootCouncil
+and ForeverLoot) for the sheet's Loot Log, so the officer running the bridge app can upload them for the guild's Discord
+bot and sheet.
 
 **Install guide for players and officers: https://tomtko.github.io/placeholder-sync/**
 

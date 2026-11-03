@@ -1,6 +1,6 @@
 ## Interface: 120105, 16001
 ## Title: PlaceholderSync
-## Notes: Records the guild bank for the bridge app, shows the officers' loot sheet in the council window and shares it with the guild in game.
+## Notes: Records the guild bank, your characters and loot council awards for the Placeholder guild tools (Discord bot and sheet).
 ## Author: tomtko
 ## Version: 0.1.0
 ## SavedVariables: PlaceholderSyncDB

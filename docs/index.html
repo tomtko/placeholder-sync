@@ -39,7 +39,7 @@
   <p class="lead">Two small pieces connect the game to the guild's Discord and officer sheet: an addon everyone can run, and a tray app one officer runs.</p>
 
   <div class="who">
-    <div class="card"><b>Everyone who raids: the addon</b><span class="muted">PlaceholderSync adds a <em>Sheet</em> column to the loot council window so you can see who is in line for an item. It also records the guild bank when you open it.</span></div>
+    <div class="card"><b>Everyone who raids: the addon</b><span class="muted">PlaceholderSync records the guild bank when you open it, so the guild sees stock and history in Discord, keeps your characters in the roster, and copies loot council awards into the Loot Log.</span></div>
     <div class="card"><b>The bridge: officers, and raiders who want to help</b><span class="muted">Placeholder Bridge sits in the tray, uploads the bank scan and the bank's own log whenever you visit the bank, and brings the sheet's loot data into the game. One officer is enough; every extra linked PC keeps the bank more current.</span></div>
   </div>
 
@@ -55,10 +55,10 @@
     <li>Unzip it into your <b>World of Warcraft</b> folder for WoW Forever, the one called <code>_forever_</code>. The zip already contains the <code>Interface\AddOns\PlaceholderSync</code> path, so the folder ends up in the right place.<br><span class="muted">Typical location: <code>C:\Program Files (x86)\World of Warcraft\_forever_\</code>. For testing on retail, the same into <code>_retail_</code>.</span></li>
     <li>Start the game, or type <code>/reload</code> if it is running. In chat, <code>/psync</code> shows the addon's status. The addon says nothing in chat by itself; <code>/psync chat on</code> turns on a line when a scan is saved or loot data arrives, and <code>/psync help</code> lists the other settings.</li>
   </ol>
-  <p>That is all a raider needs. The Sheet column appears in RCLootCouncil or ForeverLoot as soon as the bridge officer has pushed loot data once.</p>
+  <p>That is all a raider needs. From then on every guild bank visit is recorded, and your characters are known to the roster.</p>
 
   <h2 id="bridge">The bridge</h2>
-  <p>Officers link as officers and get the full loot data. Raiders with a rank role can link too: their bank visits upload like an officer's, and their loot data comes without the officer prio layer.</p>
+  <p>Officers link as officers. Raiders with a rank role can link too: their bank visits upload like an officer's.</p>
   <ol>
     <li>Download the installer from <a href="#downloads">Downloads</a> above and run it. The app starts in the system tray and opens its window.</li>
     <li>Open <b>Guilds</b> and press <b>Link this PC</b>. Your browser opens a page on the guild server: sign in with Discord, tick the guilds this PC should serve, Approve. The app picks the result up by itself within a few seconds.<br><span class="muted">Officers, administrators and the server owner link as officers; Raider, Trial and Social roles link as members. Nothing to paste.</span></li>
