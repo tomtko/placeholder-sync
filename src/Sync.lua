@@ -315,10 +315,18 @@ local function sendHave(ch)
   Ace:SendCommMessage(PREFIX, haveText(), ch, nil, "NORMAL")
 end
 
+-- Answer windows widen with the guild's online count: holders stand down when they see another's S or D, but two
+-- timers that fire within one round trip of each other both send. A hundred holders need a wider spread than five.
+local function spread()
+  local online = 0
+  if GetNumGuildMembers then online = select(2, GetNumGuildMembers()) or 0 end
+  return math.min(10, online / 10)
+end
+
 --- Reply to someone behind us, unless another holder already did.
 local function scheduleHave(ch)
   if state.pendingHave[ch] then return end
-  state.pendingHave[ch] = C_Timer.NewTimer(0.3 + math.random() * 1.5, function()
+  state.pendingHave[ch] = C_Timer.NewTimer(0.3 + math.random() * (1.5 + spread() / 2), function()
     state.pendingHave[ch] = nil
     local sh = state.seenHave[ch]
     if sh and sh.at > GetTime() - 5 and sh.L >= SETS.L.version() and sh.B >= SETS.B.version() then return end
@@ -374,7 +382,7 @@ end
 local function scheduleSend(kind, ch, to)
   local ks = kstate(kind)
   if ks.pendingSend[ch] then return end
-  ks.pendingSend[ch] = C_Timer.NewTimer(0.5 + math.random() * 3.5, function() sendData(kind, ch, to) end)
+  ks.pendingSend[ch] = C_Timer.NewTimer(0.5 + math.random() * (3.5 + spread()), function() sendData(kind, ch, to) end)
 end
 
 local function cancelSend(kind, ch)
@@ -481,9 +489,16 @@ end
 
 --- Ask for the Prio layer of the loot sheet rev we hold, when we do not have it yet: officers on officer chat,
 --- everyone else once on guild chat (one tiny message; holders answer only ranks the bot allows, others hear nothing).
-requestPrio = function()
+-- Holders answer only officers and the allowed ranks; everyone else hears nothing. Two unanswered asks per rev is the
+-- signal to stop, or a hundred raiders would ask on guild chat at every announcement for ever.
+local prioAsked = { rev = 0, n = 0 }
+requestPrio = function(force)
   if not NS.Loot or SETS.L.version() == 0 or SETS.P.version() ~= 0 or not IsInGuild() then return end
-  scheduleRequest("P", officerSelf() and "OFFICER" or "GUILD", SETS.L.version())
+  local rev = SETS.L.version()
+  if prioAsked.rev ~= rev or force then prioAsked.rev, prioAsked.n = rev, 0 end
+  if prioAsked.n >= 2 then return end
+  prioAsked.n = prioAsked.n + 1
+  scheduleRequest("P", officerSelf() and "OFFICER" or "GUILD", rev)
 end
 
 -- Lifecycle -------------------------------------------------------------------------------------
@@ -522,7 +537,7 @@ function Sync.RequestNow()
     end
   end
   kstate("P").lastRequest = 0
-  requestPrio()
+  requestPrio(true)
   NS.Print("asked %s for loot sheet data newer than rev %d and bank scans newer than %s.",
     table.concat(chs, " and "):lower(), SETS.L.version(), SETS.B.version() > 0 and date("%d/%m %H:%M", SETS.B.version()) or "none")
 end
