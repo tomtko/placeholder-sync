@@ -6,10 +6,11 @@ character cannot view, and a full 8 x 98 bank. Checks what ends up in <Addon>DB.
     python3 test/bank_sim.py
 """
 import heapq, pathlib, sys
-import lupa
+import lupa, os
+import lupa.lua51
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-L = lupa.LuaRuntime(encoding=None, unpack_returned_tuples=True)
+L = (lupa.lua51 if os.environ.get("LUA", "51") == "51" else lupa).LuaRuntime(encoding=None, unpack_returned_tuples=True)
 G = L.globals()
 
 clock = 0.0; events = []; timers = {}; seq = 0; last_activity = 0.0

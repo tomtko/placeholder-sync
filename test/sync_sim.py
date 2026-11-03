@@ -7,7 +7,8 @@ arrives whole when its last chunk has gone out.
     python3 test/sync_sim.py            # runs the scenarios, prints counts, exits 1 on a failed check
 """
 import base64, heapq, math, pathlib, random, sys, zlib
-import lupa
+import lupa, os
+import lupa.lua51
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -15,7 +16,7 @@ BYTES_PER_SEC = 800          # ChatThrottleLib MAX_CPS
 LATENCY = 0.15               # server round trip for one chunk
 CHUNK = 255
 
-L = lupa.LuaRuntime(encoding=None, unpack_returned_tuples=True)
+L = (lupa.lua51 if os.environ.get("LUA", "51") == "51" else lupa).LuaRuntime(encoding=None, unpack_returned_tuples=True)
 G = L.globals()
 
 # ---- event loop ---------------------------------------------------------------------------------
@@ -119,7 +120,7 @@ local function ser(v, out)
 end
 C_EncodingUtil = {
   SerializeCBOR = function(v) local out = {} ser(v, out) return table.concat(out) end,
-  DeserializeCBOR = function(s) return load("return " .. s)() end,
+  DeserializeCBOR = function(s) return (loadstring or load)("return " .. s)() end,
   CompressString = function(s) return py_compress(s) end,
   DecompressString = function(s) return py_decompress(s) end,
   EncodeBase64 = function(s) return py_b64e(s) end,
