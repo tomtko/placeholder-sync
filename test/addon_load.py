@@ -137,11 +137,30 @@ function GetNumSkillLines() local n = 0 for i, l in ipairs(WOW.skillLines) do if
 function GetSkillLineInfo(i) local vis = {} for j, l in ipairs(WOW.skillLines) do if l[2] or not WOW.skillHeaders[1].collapsed or j > 2 then vis[#vis + 1] = l end end local l = vis[i] if not l then return nil end return l[1], l[2], not WOW.skillHeaders[1].collapsed, l[3], 0, 0, l[4] end
 function ExpandSkillHeader(i) WOW.skillHeaders[1].collapsed = false end
 function CollapseSkillHeader(i) WOW.skillHeaders[1].collapsed = true WOW.skillCollapsedAgain = true end
-function GetNumTalentTabs() return 3 end
-function GetTalentTabInfo(tab) return ({ "Affliction", "Demonology", "Destruction" })[tab], "Interface\\Icons\\x", ({ 7, 21, 33 })[tab] end
-function GetNumTalents(tab) return 2 end
-function GetTalentInfo(tab, i) return "Talent " .. tab .. "." .. i, "Interface\\Icons\\y", i, 2, i == 1 and 5 or 0, 5 end
-function GetActiveTalentGroup() return 1 end
+-- Forever talents: one trait config, one tree, three groups
+C_ClassTalents = { GetActiveConfigID = function() return 501 end }
+C_SpecializationInfo = { GetSpecialization = function() return 1 end, GetSpecializationInfo = function(i) return 1486, "Warlock", "", 1, "DAMAGER" end }
+local NODES = { [1] = { group = 11600, spell = 18827, rank = 5, max = 5, x = 100, y = 100 }, [2] = { group = 11600, spell = 17810, rank = 0, max = 2, x = 200, y = 100 }, [3] = { group = 11610, spell = 18288, rank = 3, max = 3, x = 100, y = 100 }, [4] = { group = 11622, spell = 17877, rank = 1, max = 1, x = 300, y = 500 } }
+C_Traits = {
+  GetConfigInfo = function(id) return { ID = id, treeIDs = { 900 } } end,
+  GetGroupDisplayInfoByTreeID = function(tree) return { { groupID = 11622, displayName = "Destruction", order = 3 }, { groupID = 11600, displayName = "Affliction", order = 1 }, { groupID = 11610, displayName = "Demonology", order = 2 } } end,
+  GetGroupCurrencyInfo = function(cfg, groups) local spent = 0 for _, n in pairs(NODES) do if n.group == groups[1] then spent = spent + n.rank end end return { { currencyInfos = { { spent = spent } } } } end,
+  GetTreeCurrencyInfo = function() return { { quantity = 42 } } end,
+  GetTreeNodes = function(tree) return { 1, 2, 3, 4 } end,
+  GetNodeInfo = function(cfg, id) local n = NODES[id] return { ID = id, isVisible = true, ranksPurchased = n.rank, activeRank = n.rank, maxRanks = n.max, posX = n.x, posY = n.y, entryIDs = { id * 10 }, groupIDs = { n.group }, activeEntry = n.rank > 0 and { entryID = id * 10 } or nil } end,
+  GetEntryInfo = function(cfg, entry) return { definitionID = entry * 100 } end,
+  GetDefinitionInfo = function(def) return { spellID = NODES[def / 1000].spell } end,
+  GenerateImportString = function() return "BwAAAAAA" end,
+}
+C_Spell = { GetSpellInfo = function(id) return { name = "Spell " .. id, spellID = id } end }
+-- quests: two weeklies and a daily in the log, a flagged weekly from the officers' list
+C_QuestLog = {
+  GetNumQuestLogEntries = function() return 4 end,
+  GetInfo = function(i) return ({ { title = "Raiding", isHeader = true }, { title = "Weekly: Onyxia Head", questID = 7490, frequency = 2 },
+    { title = "Daily: Fish", questID = 9000, frequency = 1 }, { title = "Weekly: Dire Maul Tribute", questID = 7491, frequency = 2 } })[i] end,
+  IsComplete = function(id) return id == 7491 end,
+  IsQuestFlaggedCompleted = function(id) return id == 7000 end,
+}
 function GetPVPLifetimeStats() return 1234, 2 end
 function UnitPVPRank() return 9 end
 function GetPVPRankInfo(rank) return "Knight-Lieutenant", 5 end
@@ -194,6 +213,7 @@ PlaceholderSync_Data = { rev = 3, writtenAt = BASE - 600, generatedAt = (BASE - 
   chars = { fluffys = { n = "Fluffys", p = "Tom", c = "WARLOCK", sp = "Destruction", rk = "Officer", st = "Main", bis = 3, of = 12 }, mlad = { n = "Mlad", p = "Mlad", c = "HUNTER", rk = "Raider", st = "Main", bis = 1, of = 10 } },
   needers = { ["250224"] = { "fluffys", "mlad" }, ["n:spirit-rending poison"] = { "mlad" } },
   prio = { ["250224"] = { "mlad", "fluffys" } }, prioRanks = { "Council" },
+  weeklyQuests = { { id = 7000, name = "Weekly: Blackrock" }, { id = 7001, name = "Weekly: Zul'Gurub" } },
   owned = { fluffys = { ["n:spirit-rending poison"] = "2026-10-30" } },
 } }
 ''')
@@ -239,12 +259,18 @@ db0 = G.PlaceholderSyncDB
 rec = db0.characters[b"Player-1403-0000ABCD"]
 check(rec is not None and rec.gear is not None, "full record captured a few seconds after login")
 def f(k): return rec[k.encode()] if rec is not None else None
-check(f("name") == b"Fluffys" and f("class") == b"WARLOCK" and f("race") == b"Orc" and f("faction") == b"Horde" and f("level") == 60 and f("guildRank") == b"Officer" and f("flavor") == b"CAMELOT", "identity fields")
+check(f("name") == b"Fluffys" and f("class") == b"WARLOCK" and f("race") == b"Orc" and f("faction") == b"Horde" and f("level") == 60 and f("guildRank") == b"Officer" and f("sex") is None and f("flavor") is None and f("project") is None, "identity fields, no sex or client")
 gear = f("gear"); check(gear is not None and len(list(gear.keys())) == 4 and gear[1].id == 250224 and gear[1].enchant == 2583 and gear[1].ilvl == 115 and gear[1].quality == 4 and gear[2].enchant is None and bytes(gear[16].name) == b"Worn 17182", "gear: ids, enchants, ilvl, quality, names")
 check(f("avgIlvl") == 110.5 and f("avgIlvlEquipped") == 108.25, "average item level")
 prof = f("professions"); check(prof is not None and bytes(prof.primary1.name) == b"Tailoring" and prof.primary1.skill == 299 and bytes(prof.firstAid.name) == b"First Aid" and prof.archaeology is None, "professions by slot")
 skills = f("skills"); check(skills is not None and len(list(skills.keys())) == 4 and bool(G.WOW.skillCollapsedAgain), "skill lines read with the collapsed header opened and closed again")
-tal = f("talents"); check(tal is not None and tal.tabs[2].points == 21 and bytes(tal.tabs[3].name) == b"Destruction" and len(list(tal.talents.keys())) == 6 and tal.talents[1].rank == 5 and tal.activeGroup == 1, "talent tabs, points and ranks")
+tal = f("talents"); tals = [tal.talents[k] for k in list(tal.talents.keys())] if tal is not None else []
+check(tal is not None and tal.source == b"traits" and [bytes(tal.tabs[i].name) for i in (1, 2, 3)] == [b"Affliction", b"Demonology", b"Destruction"] and [tal.tabs[i].points for i in (1, 2, 3)] == [5, 3, 1] and tal.unspent == 42, f"Forever talent trees: ordered groups and points")
+check(len(tals) == 4 and any(t.spellID == 18827 and t.rank == 5 and t.tab == 1 and bytes(t.name) == b"Spell 18827" for t in tals) and any(t.rank == 0 and t.max == 2 for t in tals), "talent nodes with spell, rank, max and tab")
+check(tal is not None and tal.spec is not None and tal.spec.id == 1486 and bytes(tal.exportString) == b"BwAAAAAA", "spec and export string")
+qs = f("quests"); qlog = [qs.log[k] for k in list(qs.log.keys())] if qs is not None else []
+check(len(qlog) == 3 and {int(q.id): (q.frequency, q.complete) for q in qlog} == {7490: (2, None), 9000: (1, None), 7491: (2, True)}, f"daily and weekly quests from the log with completion")
+check(qs is not None and qs.flagged[b"7000"] is True and qs.flagged[b"7001"] is False, "officer-listed weeklies checked by flag")
 pvp = f("pvp"); check(pvp is not None and pvp.honorableKills == 1234 and pvp.rank == 9 and bytes(pvp.rankName) == b"Knight-Lieutenant", "pvp kills and rank")
 reps = f("reputations"); check(reps is not None and len(list(reps.keys())) == 2 and bytes(reps[2].name) == b"Darkspear Trolls" and reps[2].standing == 6 and bool(G.WOW.repCollapsedAgain) and bool(G.WOW.repCollapsed), "reputations read under a collapsed header, header restored")
 st = f("stats"); check(st is not None and st.hp == 5000 and st.mana == 7000 and st.armor == 1300 and st.resistances.fire == 30 and st.strength == 61 and st.attackPower == 350 and st.spellPower == 407 and st.healingPower == 250 and st.meleeCrit == 12.35 and st.spellHit == 6.5, "stats and resistances")
@@ -253,7 +279,7 @@ check(bg is not None and bagd["items"][13446] == 15 and bagd["items"][13450] == 
 check(f("money") == 1234567, "money")
 lk = f("lockouts"); check(lk is not None and len(list(lk.keys())) == 1 and bytes(lk[1].name) == b"Molten Core" and lk[1].progress == 3 and lk[1].raid is True, "raid lockouts after RequestRaidInfo")
 miss = f("missing"); miss_l = [bytes(v).decode() for v in miss.values()] if miss is not None else []
-check("UnitHonorLevel" in miss_l and "GetSpecialization" in miss_l and "GetFactionInfo" not in miss_l, f"absent APIs listed, used families not ({miss_l})")
+check("UnitHonorLevel" in miss_l and "GetNumTalentTabs" not in miss_l and "GetFactionInfo" not in miss_l, f"absent APIs listed, used families not ({miss_l})")
 check(f("errors") is None, f"no capture errors ({f('errors') and [bytes(v) for v in f('errors').values()]})")
 check(f("reason") in (b"login", b"change"), f"reason recorded ({f('reason')})")
 # a gear change outside combat recaptures after the debounce; in combat it waits

@@ -9,14 +9,15 @@
 
   Captured at login (8 s in, so item links are cached), after gear / skill / talent / reputation / bag / money
   changes (10 s debounce, never in combat), and at logout. Each record:
-    identity   name, realm, class, classId, race, raceFile, faction, sex, level, guild, guildRank, guildRankIndex,
-               project (WOW_PROJECT_ID), flavor name, updatedAt, reason
+    identity   name, realm, class, classId, race, raceFile, faction, level, guild, guildRank, guildRankIndex, updatedAt, reason
     gear       [slot] = { slot, name, id, link, itemString, ilvl, quality, enchant, gems = {...}, suffix }  (19 slots)
                avgIlvl, avgIlvlEquipped, missing enchant count is left to the sheet (it knows which slots count)
     professions retail: { name, skill, max, skillLine, icon } x up to 6 (primary 1-2, fishing, cooking, first aid,
                archaeology); classic: skills = every skill line { name, rank, max, header } (weapons, defence too)
-    talents    classic: tabs = { { name, points, raw = {...} } }, talents = { { tab, name, tier, col, rank, max } },
-               activeGroup; retail: spec = { id, name, role }, exportString (C_Traits)
+    talents    Forever (trait trees): tabs = { { groupID, name, points } }, talents = { { tab, nodeID, spellID, name, rank, max, x, y } },
+               unspent, source = "traits"; classic tabs: the same with tier/col, source = "tabs"; spec where the client has one
+    quests     log = { { id, title, frequency (1 daily, 2 weekly), complete } }, flagged = { [questId] = done } for the ids
+               the officers list in the loot data
     pvp        honorableKills, dishonorableKills, rank, rankName, honorLevel
     reputations [i] = { id, name, standing, value, min, max, header, child, atWar }  (collapsed headers expanded and restored)
     stats      hp, mana, powerType, armor, resistances = { holy, fire, nature, frost, shadow, arcane }, strength, agility,
@@ -75,15 +76,6 @@ end
 
 -- Identity --------------------------------------------------------------------------------------
 
-local PROJECT_NAMES = { "MAINLINE", "CLASSIC", "BURNING_CRUSADE_CLASSIC", "WRATH_CLASSIC", "CATACLYSM_CLASSIC", "MISTS_CLASSIC", "CAMELOT" }
-local function flavorName()
-  for _, n in ipairs(PROJECT_NAMES) do
-    local id = _G["WOW_PROJECT_" .. n]
-    if id and id == WOW_PROJECT_ID then return n end
-  end
-  return nil
-end
-
 local function identity(rec)
   local name = first("UnitName", "player")
   local realm = first("GetNormalizedRealmName") or first("GetRealmName")
@@ -94,10 +86,8 @@ local function identity(rec)
   rec.class, rec.className, rec.classId = classR[2], classR[1], classR[3]
   rec.race, rec.raceFile, rec.raceId = raceR[1], raceR[2], raceR[3]
   rec.faction = first("UnitFactionGroup", "player")
-  rec.sex = first("UnitSex", "player")
   rec.level = first("UnitLevel", "player")
   rec.guild, rec.guildRank, rec.guildRankIndex = guildR[1], guildR[2], guildR[3]
-  rec.project, rec.flavor = WOW_PROJECT_ID, flavorName()
 end
 
 -- Gear ------------------------------------------------------------------------------------------
@@ -175,42 +165,127 @@ local function professions(rec)
 end
 
 -- Talents ----------------------------------------------------------------------------------------
+-- Forever shows the classic three trees through the trait-tree API: one config, one tree, three display groups,
+-- a node per talent with ranksPurchased; the spell behind a node names it. Classic clients keep the old tab API.
+
+local function spellName(spellID)
+  local info = resolve("C_Spell.GetSpellInfo")
+  if info then
+    local ok, d = pcall(info, spellID)
+    if ok and type(d) == "table" then return plain(d.name) end
+  end
+  return first("GetSpellInfo", spellID)
+end
+
+local function traitConfig()
+  local id = first("C_ClassTalents.GetActiveConfigID")
+  if type(id) == "number" then return id end
+  local group = first("C_SpecializationInfo.GetActiveSpecGroup")
+  if type(group) == "number" then
+    id = first("C_SpecializationInfo.GetCombatConfigIDForSpecGroup", group)
+    if type(id) == "number" then return id end
+  end
+  return nil
+end
+
+local function traitTalents(t)
+  local configID = traitConfig()
+  if not configID then return false end
+  local getConfig, getNodes, getNode = resolve("C_Traits.GetConfigInfo"), resolve("C_Traits.GetTreeNodes"), resolve("C_Traits.GetNodeInfo")
+  if not (getConfig and getNodes and getNode) then return false end
+  local ok, config = pcall(getConfig, configID)
+  if not ok or type(config) ~= "table" or type(config.treeIDs) ~= "table" then return false end
+  t.configID = configID
+  t.tabs, t.talents = {}, {}
+  local groupIndex = {}
+  for _, treeID in ipairs(config.treeIDs) do
+    local groupsFn = resolve("C_Traits.GetGroupDisplayInfoByTreeID")
+    local okG, groups = false, nil
+    if groupsFn then okG, groups = pcall(groupsFn, treeID) end   -- a conditional expression would keep only pcall's first return
+    if okG and type(groups) == "table" then
+      table.sort(groups, function(a, b) return (tonumber(a.order) or 0) < (tonumber(b.order) or 0) end)
+      for _, g in ipairs(groups) do
+        local tab = { groupID = plain(g.groupID), name = plain(g.displayName), order = plain(g.order), treeID = treeID }
+        local curFn = resolve("C_Traits.GetGroupCurrencyInfo")
+        local okC, cur = false, nil
+        if curFn then okC, cur = pcall(curFn, configID, { g.groupID }) end
+        local c = okC and type(cur) == "table" and cur[1]
+        local ci = c and type(c.currencyInfos) == "table" and c.currencyInfos[1]
+        if ci then tab.points = plain(ci.spent) end
+        t.tabs[#t.tabs + 1] = tab
+        groupIndex[tab.groupID] = #t.tabs
+      end
+    end
+    local treeFn = resolve("C_Traits.GetTreeCurrencyInfo")
+    local okT, tc = false, nil
+    if treeFn then okT, tc = pcall(treeFn, configID, treeID, false) end
+    if okT and type(tc) == "table" and type(tc[1]) == "table" then t.unspent = plain(tc[1].quantity) end
+    local okN, nodes = pcall(getNodes, treeID)
+    for _, nodeID in ipairs(okN and type(nodes) == "table" and nodes or {}) do
+      local okI, node = pcall(getNode, configID, nodeID)
+      if okI and type(node) == "table" and node.isVisible ~= false then
+        local rank = math.max(tonumber(plain(node.ranksPurchased)) or 0, tonumber(plain(node.activeRank)) or 0)
+        local entryID = type(node.activeEntry) == "table" and plain(node.activeEntry.entryID) or (type(node.entryIDs) == "table" and plain(node.entryIDs[1])) or nil
+        local spellID
+        if entryID then
+          local okE, entry = pcall(resolve("C_Traits.GetEntryInfo") or error, configID, entryID)
+          local defID = okE and type(entry) == "table" and plain(entry.definitionID)
+          if defID then
+            local okD, def = pcall(resolve("C_Traits.GetDefinitionInfo") or error, defID)
+            if okD and type(def) == "table" then spellID = plain(def.spellID) end
+          end
+        end
+        local groupID = type(node.groupIDs) == "table" and plain(node.groupIDs[1]) or nil
+        t.talents[#t.talents + 1] = { tab = groupIndex[groupID], nodeID = nodeID, spellID = spellID, name = spellID and spellName(spellID) or nil,
+          rank = rank, max = plain(node.maxRanks), x = plain(node.posX), y = plain(node.posY) }
+      end
+    end
+  end
+  -- points per tab from the nodes when the currency call gave nothing
+  for i, tab in ipairs(t.tabs) do
+    if tab.points == nil then
+      local sum = 0
+      for _, tl in ipairs(t.talents) do if tl.tab == i then sum = sum + (tl.rank or 0) end end
+      tab.points = sum
+    end
+  end
+  return #t.talents > 0
+end
+
+local function classicTalents(t)
+  local tabs = first("GetNumTalentTabs")
+  if type(tabs) ~= "number" or tabs == 0 then return false end
+  t.tabs, t.talents = {}, {}
+  for tab = 1, tabs do
+    local info = call("GetTalentTabInfo", tab) or {}
+    local name
+    for _, v in ipairs(info) do if not name and type(v) == "string" and not v:find("\\") then name = v end end
+    local points = 0
+    local count = first("GetNumTalents", tab)
+    for i = 1, (type(count) == "number" and count or 0) do
+      local ti = call("GetTalentInfo", tab, i)
+      if ti and type(ti[1]) == "string" then
+        t.talents[#t.talents + 1] = { tab = tab, name = ti[1], tier = ti[3], col = ti[4], rank = ti[5], max = ti[6] }
+        points = points + (tonumber(ti[5]) or 0)
+      end
+    end
+    t.tabs[tab] = { name = name, points = points, raw = info }
+  end
+  t.activeGroup = first("GetActiveTalentGroup") or first("GetActiveSpecGroup")
+  return true
+end
 
 local function talents(rec)
   local t = {}
-  local tabs = first("GetNumTalentTabs")
-  if type(tabs) == "number" and tabs > 0 then
-    t.tabs, t.talents = {}, {}
-    for tab = 1, tabs do
-      local info = call("GetTalentTabInfo", tab) or {}
-      local name, points
-      for _, v in ipairs(info) do if not name and type(v) == "string" and not v:find("\\") then name = v end end
-      -- pointsSpent is the first integer after the name that is not an icon id: classic era returns (name, icon, points),
-      -- wrath-style (id, name, desc, icon, points). Keep the raw returns so the backend can decide.
-      local seenName = false
-      for _, v in ipairs(info) do
-        if v == name then seenName = true
-        elseif seenName and points == nil and type(v) == "number" and v < 100 then points = v end
-      end
-      t.tabs[tab] = { name = name, points = points, raw = info }
-      local count = first("GetNumTalents", tab)
-      for i = 1, (type(count) == "number" and count or 0) do
-        local ti = call("GetTalentInfo", tab, i)
-        if ti and type(ti[1]) == "string" then
-          t.talents[#t.talents + 1] = { tab = tab, name = ti[1], tier = ti[3], col = ti[4], rank = ti[5], max = ti[6] }
-        end
-      end
-    end
-    t.activeGroup = first("GetActiveTalentGroup") or first("GetActiveSpecGroup")
-  end
-  local specIndex = first("GetSpecialization")
+  if traitTalents(t) then t.source = "traits"
+  elseif classicTalents(t) then t.source = "tabs" end
+  local specIndex = first("C_SpecializationInfo.GetSpecialization") or first("GetSpecialization")
   if type(specIndex) == "number" then
-    local info = call("GetSpecializationInfo", specIndex)
+    local info = call("C_SpecializationInfo.GetSpecializationInfo", specIndex) or call("GetSpecializationInfo", specIndex)
     if info then t.spec = { index = specIndex, id = info[1], name = info[2], role = info[5] } end
   end
-  local cfg = first("C_ClassTalents.GetActiveConfigID")
-  if type(cfg) == "number" then
-    local s = first("C_Traits.GenerateImportString", cfg)
+  if type(t.configID) == "number" then
+    local s = first("C_Traits.GenerateImportString", t.configID)
     if type(s) == "string" and s ~= "" then t.exportString = s end
   end
   if next(t) then rec.talents = t end
@@ -345,6 +420,47 @@ local function bags(rec)
   rec.bags = { items = items, names = names, slots = slots, free = free }
 end
 
+-- Quests -----------------------------------------------------------------------------------------
+-- Daily and weekly quests in the log with their state, and done/not-done for the quest ids the officers list in the
+-- loot data (payload.weeklyQuests = { { id, name }, ... }), so the sheet can track weeklies without the quest in the log.
+
+local function quests(rec)
+  local q = { log = {} }
+  local n = first("C_QuestLog.GetNumQuestLogEntries")
+  if type(n) == "number" and resolve("C_QuestLog.GetInfo") then
+    for i = 1, n do
+      local ok, d = pcall(resolve("C_QuestLog.GetInfo"), i)
+      if ok and type(d) == "table" and not d.isHeader then
+        local freq = plain(d.frequency)
+        if freq and freq ~= 0 then
+          local done = first("C_QuestLog.IsComplete", plain(d.questID))
+          q.log[#q.log + 1] = { id = plain(d.questID), title = plain(d.title), frequency = freq, complete = done == true or nil }
+        end
+      end
+    end
+  elseif resolve("GetQuestLogTitle") then
+    local count = call("GetNumQuestLogEntries")
+    for i = 1, (count and count[1]) or 0 do
+      local r = call("GetQuestLogTitle", i)
+      if r and r[1] and r[4] ~= true and r[7] and r[7] ~= 0 then
+        q.log[#q.log + 1] = { id = r[8], title = r[1], frequency = r[7], complete = r[6] == 1 or r[6] == true or nil }
+      end
+    end
+  else
+    miss("C_QuestLog.GetInfo")
+  end
+  local c = NS.Loot and NS.Loot.Current()
+  local list = c and c.payload and c.payload.weeklyQuests
+  if type(list) == "table" and resolve("C_QuestLog.IsQuestFlaggedCompleted") then
+    q.flagged = {}
+    for _, w in ipairs(list) do
+      local id = type(w) == "table" and tonumber(w.id) or tonumber(w)
+      if id then q.flagged[tostring(id)] = first("C_QuestLog.IsQuestFlaggedCompleted", id) == true end
+    end
+  end
+  rec.quests = q
+end
+
 -- Lockouts ----------------------------------------------------------------------------------------
 
 local function lockouts(rec)
@@ -375,7 +491,7 @@ function Char.Capture(reason)
   capturing = true
   missing, absent = {}, {}
   local rec = {}
-  local parts = { identity, gear, professions, talents, pvp, reputations, stats, bags, lockouts, function(r) r.money = first("GetMoney") end }
+  local parts = { identity, gear, professions, talents, pvp, reputations, stats, bags, quests, lockouts, function(r) r.money = first("GetMoney") end }
   local failed = {}
   for i, part in ipairs(parts) do
     local ok, err = pcall(part, rec)
@@ -403,7 +519,7 @@ local function soon(reason)
   end)
 end
 
-local CHANGE_EVENTS = { "PLAYER_EQUIPMENT_CHANGED", "SKILL_LINES_CHANGED", "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE",
+local CHANGE_EVENTS = { "QUEST_LOG_UPDATE", "PLAYER_EQUIPMENT_CHANGED", "SKILL_LINES_CHANGED", "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE",
   "ACTIVE_TALENT_GROUP_CHANGED", "TRAIT_CONFIG_UPDATED", "UPDATE_FACTION", "PLAYER_MONEY", "BAG_UPDATE_DELAYED",
   "UPDATE_INSTANCE_INFO", "PLAYER_LEVEL_UP", "PLAYER_GUILD_UPDATE" }
 
