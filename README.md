@@ -7,7 +7,7 @@ upload them for the guild's Discord bot and sheet.
 
 **Install guide for players and officers: https://tomtko.github.io/placeholder-sync/**
 
-In game, `/psync` shows the status and `/psync help` the settings (`chat`, `autoscan`, `share`). It prints nothing by
+In game, `/psync` shows the status and `/psync help` the settings (`chat`, `autoscan`, `share`). It prints nothing by itself unless `/psync chat on`.
 
 ## Building
 
