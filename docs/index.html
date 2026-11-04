@@ -72,6 +72,15 @@
   <h3>Two guilds on one PC</h3>
   <p>Tick both guilds when you link. Each WoW install is matched to the guild named in its addon file, so <code>_forever_</code> and <code>_retail_</code> can serve different guilds; Game accounts lets you pin an install to a guild if the match is not what you want. Unlinking a PC is done in the guild's Discord with <code>/settings devices</code>.</p>
 
+  <h2 id="newguild">Setting up a new guild</h2>
+  <p>Once per guild, by a Discord server administrator. Everything else on this page assumes it is done.</p>
+  <ol>
+    <li>Invite the bot to the guild's Discord server and ask the bot owner to run <code>/setup start</code> there. The reply holds the sheet webhook secret needed in step 3.</li>
+    <li><a href="https://docs.google.com/spreadsheets/d/1njGk1lulOAeDe3edT9v6WqyIYO77CD0tuEaz_CEDG9k/copy"><b>Make a copy of the officer sheet template</b></a>. Google asks you to copy it; name the copy after the guild. The template itself is view-only, the copy is yours with every tab, formula and menu.<br><span class="muted">Whoever makes the copy owns it, so use the Google account of the officer who will keep the sheet.</span></li>
+    <li>Open the copy; the menus (Guild, Rosters, Splits, Loot, Settings) appear a few seconds after the first load. Run <b>Settings menu → Set up this copy (new guild, run once)…</b>. Google asks for permission the first time: allow it, and run the item again if the dialog did not continue. It shares the sheet with the bot, saves the webhook secret, installs the timed jobs and ends with the exact <code>/settings sheet</code> line to paste in Discord.</li>
+    <li>In Discord, <code>/settings onboard</code> walks through the remaining settings (officer roles, wishlist forum, bank channels, log channels, rank roles) with Discord's own pickers.</li>
+  </ol>
+
   <h2 id="what">What gets uploaded</h2>
   <table>
     <tr><th>From</th><th>What</th><th>Where it goes</th></tr>
