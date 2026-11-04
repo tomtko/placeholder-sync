@@ -5,8 +5,6 @@ whenever the bank is opened, records your characters in full (gear, professions,
 and ForeverLoot) for the sheet's Loot Log, so the officer running the bridge app can upload them for the guild's Discord
 bot and sheet.
 
-**Install guide for players and officers: https://tomtko.github.io/placeholder-sync/**
-
 In game, `/psync` shows the status and `/psync help` the settings (`chat`, `autoscan`, `share`). It prints nothing by itself unless `/psync chat on`.
 
 ## Building
