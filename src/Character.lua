@@ -83,6 +83,7 @@ local function identity(rec)
   local raceR = call("UnitRace", "player") or {}
   local guildR = call("GetGuildInfo", "player") or {}
   rec.name, rec.realm = name, realm
+  rec.realmId = NS.RealmId and NS.RealmId() or nil
   rec.class, rec.className, rec.classId = classR[2], classR[1], classR[3]
   rec.race, rec.raceFile, rec.raceId = raceR[1], raceR[2], raceR[3]
   rec.faction = first("UnitFactionGroup", "player")

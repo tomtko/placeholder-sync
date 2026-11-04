@@ -106,6 +106,7 @@ local function finishScan(complete)
   local fresh = {
     guild = guild,
     realm = realm or ((GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName()),
+    realmId = NS.RealmId and NS.RealmId() or nil,
     by = NS.PlayerKey(),
     at = time(),
     money = GetGuildBankMoney() or 0,
@@ -384,6 +385,16 @@ local function onOpened()
   C_Timer.After(0.3, function() if frameOpen then NS.StartScan(false) end end)
 end
 
+local POPUP_RELOAD = ADDON:upper() .. "_RELOAD_AFTER_BANK"
+if StaticPopupDialogs then
+  StaticPopupDialogs[POPUP_RELOAD] = {
+    text = ADDON .. ": bank scan saved. Reload now so it reaches the bridge?\n\n(/psync prompt off stops this question.)",
+    button1 = "Reload", button2 = "Later",
+    OnAccept = function() ReloadUI() end,
+    timeout = 60, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+  }
+end
+
 local function onClosed()
   if not frameOpen then return end
   frameOpen = false
@@ -397,6 +408,10 @@ local function onClosed()
   end
   -- Tell the other addon users (Sync.lua): whoever runs the bridge picks the scan up from here.
   if NS.pendingUpload and NS.Sync and NS.Sync.Changed then NS.Sync.Changed() end
+  -- Opt-in (/psync prompt on): a Reload button, because the file only reaches the bridge when the game writes it.
+  if NS.pendingUpload and NS.Option("prompt") and StaticPopup_Show and not (InCombatLockdown and InCombatLockdown()) then
+    StaticPopup_Show(POPUP_RELOAD)
+  end
 end
 
 local GUILD_BANKER = Enum and Enum.PlayerInteractionType and Enum.PlayerInteractionType.GuildBanker

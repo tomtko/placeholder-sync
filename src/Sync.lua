@@ -62,6 +62,7 @@ local state = {
   restricted = false,  -- the client currently blocks addon chat
   queue = {},          -- [key] = function() ... end, held back while restricted or in combat
   lastHave = {},       -- [channel] = GetTime() of our last H
+  lastVersion = {},    -- [channel] = GetTime() of our last V (addon version, so guildmates learn a newer one is out)
   seenHave = {},       -- [channel] = { at, L, B }: the newest H anyone broadcast there
   pendingHave = {},    -- [channel] = timer
   received = 0, sent = 0,
@@ -313,6 +314,33 @@ local function sendHave(ch)
   state.lastHave[ch] = now
   wire("out", "H", haveText(), ch)
   Ace:SendCommMessage(PREFIX, haveText(), ch, nil, "NORMAL")
+  -- Our addon version rides along at most every 10 minutes per channel: older clients ignore a V, newer ones compare.
+  if NS.VERSION and NS.VERSION ~= "dev" and (not state.lastVersion[ch] or state.lastVersion[ch] < now - 600) then
+    state.lastVersion[ch] = now
+    wire("out", "V", PROTO .. "V" .. NS.VERSION, ch)
+    Ace:SendCommMessage(PREFIX, PROTO .. "V" .. NS.VERSION, ch, nil, "BULK")
+  end
+end
+
+--- "0.3.5" vs "0.3.4": 1, 0 or -1; nil when either is not dotted digits.
+local function compareVersions(a, b)
+  if type(a) ~= "string" or type(b) ~= "string" or not a:find("^%d+[%d%.]*$") or not b:find("^%d+[%d%.]*$") then return nil end
+  local pa, pb = {}, {}
+  for n in a:gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
+  for n in b:gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
+  for i = 1, math.max(#pa, #pb) do
+    local x, y = pa[i] or 0, pb[i] or 0
+    if x ~= y then return x > y and 1 or -1 end
+  end
+  return 0
+end
+Sync.CompareVersions = compareVersions
+
+local function onVersion(theirs)
+  if #theirs > 16 or compareVersions(theirs, NS.VERSION) ~= 1 then return end
+  if NS.NewerVersion and compareVersions(theirs, NS.NewerVersion) ~= 1 then return end
+  NS.NewerVersion = theirs
+  NS.Notify("%s %s is out (you run %s). Update it with the CurseForge app or from the install page.", PREFIX, theirs, NS.VERSION)
 end
 
 -- Answer windows widen with the guild's online count: holders stand down when they see another's S or D, but two
@@ -430,6 +458,10 @@ local function onComm(_, msg, channel, sender)
     return
   elseif op ~= "H" and kind == "P" and op ~= "R" then
     return -- on guild and raid the Prio layer is only ever asked for, never sent
+  end
+  if op == "V" then
+    if channel == "GUILD" or channel == "RAID" then onVersion(msg:sub(3)) end
+    return
   end
   if op == "H" then
     local l, b = msg:match("^.H(%d+),(%d+)$")
@@ -570,6 +602,7 @@ function Sync.Status()
   end
   local gb = NS.db and NS.db.guildBank
   if gb and gb.sharedFrom then parts[#parts + 1] = ("bank scan here is %s's, received %s"):format(short(gb.sharedFrom), date("%d/%m %H:%M", gb.receivedAt or 0)) end
+  if NS.NewerVersion then parts[#parts + 1] = ("version %s seen in the guild, this is %s"):format(NS.NewerVersion, NS.VERSION) end
   parts[#parts + 1] = ("%d received, %d sent this session"):format(state.received, state.sent)
   if state.restricted then parts[#parts + 1] = "addon chat restricted right now" end
   if next(state.queue) then parts[#parts + 1] = "messages waiting" end

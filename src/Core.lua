@@ -50,13 +50,14 @@ function NS.Notices() return notices end
 -- Settings ------------------------------------------------------------------------------------
 -- Account-wide, in the SavedVariables. Missing keys take the default, so new settings need no migration.
 
-local OPTION_DEFAULTS = { chat = false, autoscan = true, share = true }
+local OPTION_DEFAULTS = { chat = false, autoscan = true, share = true, prompt = false }
 local OPTION_HELP = {
   chat = "print a line when a bank scan is saved or loot data arrives",
   autoscan = "scan the guild bank by itself when you open it (off: only %s scan)",
   share = "share the loot sheet and bank scans with guildmates in game (a change applies after /reload)",
+  prompt = "after a bank visit, offer a Reload button so the scan reaches the bridge right away (never reloads by itself)",
 }
-local OPTION_ORDER = { "chat", "autoscan", "share" }
+local OPTION_ORDER = { "chat", "autoscan", "share", "prompt" }
 
 function NS.Option(key)
   local o = NS.db and NS.db.options
@@ -86,6 +87,15 @@ function NS.PlayerKey()
   local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName() or ""
   realm = realm:gsub("%s+", "")
   return realm ~= "" and (name .. "-" .. realm) or name
+end
+
+--- The home realm's numeric id from the player GUID ("Player-<realmId>-<hex>"). GetRealmID and the realm name
+--- follow the server the character is on right now, which on WoW Forever changes when a ruleset moves it; the
+--- GUID does not.
+function NS.RealmId()
+  local ok, guid = pcall(UnitGUID, "player")
+  if not ok or type(guid) ~= "string" then return nil end
+  return tonumber(guid:match("^Player%-(%d+)%-"))
 end
 
 -- SavedVariables --------------------------------------------------------------------------------
@@ -139,6 +149,7 @@ function NS.RecordCharacter(reason)
   local rec = db.characters[guid] or {}
   rec.name = name
   rec.realm = realm
+  rec.realmId = NS.RealmId()
   rec.class = class
   rec.level = UnitLevel("player")
   rec.guild = GetGuildInfo("player")
@@ -199,6 +210,29 @@ function NS.ApiCheck()
   return missing
 end
 
+-- Upload acknowledgement -------------------------------------------------------------------------------
+-- The bridge writes <AddonName>_Data/Upload.lua after every upload of this install's file:
+--   <AddonName>_Upload = { at, scanAt, status, gold, items, tabs, by, characters, appVersion }  (at, scanAt: unix seconds)
+-- Like Data.lua it is read at login or /reload, so it describes the upload before this session started.
+
+--- One sentence for /psync: did the last scan reach the server? nil when the bridge never wrote the file here.
+function NS.LastUpload()
+  local up = _G[ADDON .. "_Upload"]
+  if type(up) ~= "table" or not up.at then return nil end
+  local when = date("%d/%m %H:%M", up.at)
+  if up.status ~= "stored" and up.status ~= "unchanged" then
+    return ("last upload from this PC %s: %s"):format(when, tostring(up.error or up.status or "?"))
+  end
+  local gb = NS.db and NS.db.guildBank
+  local scan = up.scanAt and date("%d/%m %H:%M", up.scanAt) or "no bank scan"
+  if gb and up.scanAt and up.scanAt >= gb.at then
+    return ("the scan from %s reached the server %s"):format(scan, when)
+  elseif gb and up.scanAt then
+    return ("the server has the scan from %s (uploaded %s); the %s scan goes at your next /reload or logout"):format(scan, when, date("%d/%m %H:%M", gb.at))
+  end
+  return ("last upload from this PC %s (%s)"):format(when, scan)
+end
+
 -- Slash command ---------------------------------------------------------------------------------
 
 local function status()
@@ -213,6 +247,8 @@ local function status()
       gb.complete and "" or " (incomplete)",
       NS.pendingUpload and ("Uploads at your next /reload or logout (" .. SLASH .. " reload does it now).") or "Already written to disk.")
   end
+  local up = NS.LastUpload()
+  if up then NS.Print(up .. ".") end
   local info = NS.Loot and NS.Loot.Info()
   if info then
     local how = info.source == "shared" and ("received in game from " .. (Ambiguate and Ambiguate(info.from or "?", "short") or tostring(info.from))) or "from the bridge app"
@@ -224,6 +260,7 @@ local function status()
     else NS.Print("this character is in %s, not %s: nothing is recorded or shared from here.", GetGuildInfo("player") or "no guild", want) end
   end
   if NS.Sync then NS.Print(NS.Sync.Status() .. ".") end
+  if NS.NewerVersion then NS.Print("%s %s is out (you run %s): update it with the CurseForge app or from the install page.", ADDON, NS.NewerVersion, NS.VERSION) end
   if NS.LootLog then
     local n, week = NS.LootLog.Count()
     NS.Print("%d council award%s recorded for the Loot Log (%d this week).", n, n == 1 and "" or "s", week)

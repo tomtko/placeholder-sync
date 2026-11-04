@@ -60,6 +60,8 @@ function hooksecurefunc(t, name, fn) if type(t) == "string" then return end loca
 function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 function UnitName() return WOW.name end
 function UnitGUID() return "Player-1403-0000ABCD" end
+StaticPopupDialogs = {}
+function StaticPopup_Show(name, ...) WOW.popups = WOW.popups or {}; table.insert(WOW.popups, name) end
 function UnitClass() return "Warlock", "WARLOCK" end
 function UnitLevel() return 60 end
 function GetGuildInfo() return WOW.guild, "Officer", 1, "Realm" end
@@ -70,7 +72,7 @@ function IsInRaid() return WOW.inRaid end
 LE_PARTY_CATEGORY_HOME = 1
 function InCombatLockdown() return WOW.combat end
 function Ambiguate(n) return (tostring(n):match("^([^-]+)")) end
-C_AddOns = { GetAddOnMetadata = function(a, k) if k == "Version" then return "0.3.4" end end, IsAddOnLoaded = function(a) return WOW.loaded[a] == true end }
+C_AddOns = { GetAddOnMetadata = function(a, k) if k == "Version" then return "0.3.5" end end, IsAddOnLoaded = function(a) return WOW.loaded[a] == true end }
 C_GuildInfo = { GuildRoster = function() end, IsGuildOfficer = function() return WOW.officer end }
 function GetNumGuildMembers() return 40, 25 end
 function GetGuildRosterInfo(i) return "Member" .. i .. "-Realm", i <= 5 and "Officer" or "Raider" end
@@ -253,6 +255,7 @@ run(20)
 check(G.PlaceholderSyncDB is not None, "SavedVariables table created")
 check(not printed, f"nothing printed at login by default ({printed})")
 check(any(d == "GUILD" for _, d in sent), "announced on guild chat after login")
+check(any(t == b"2V0.3.5" and d == "GUILD" for t, d in sent), f"the addon version rides along with the first announcement ({[t for t, d in sent]})")
 
 print("== character capture")
 db0 = G.PlaceholderSyncDB
@@ -297,10 +300,10 @@ out = slash("capture"); check(out and out[0].startswith("PlaceholderSync: charac
 print("== slash commands")
 out = slash("")
 check(any("no guild bank scan yet" in l for l in out), "status says no scan yet")
-check(any("settings: chat off, autoscan on, share on" in l for l in out), "status lists the settings with defaults")
+check(any("settings: chat off, autoscan on, share on, prompt off" in l for l in out), "status lists the settings with defaults")
 check(any("serving guild Placeholder" in l for l in out), "status names the guild from the bridge data")
 check(any(l.startswith("PlaceholderSync: character data: ") for l in out), "status has the character data line")
-out = slash("help"); check(len(out) == 4 and any("chat on|off" in l for l in out) and "capture" in out[0], "help lists commands and three settings")
+out = slash("help"); check(len(out) == 5 and any("chat on|off" in l for l in out) and any("prompt on|off" in l for l in out) and "capture" in out[0], "help lists commands and four settings")
 out = slash("chat on"); check(out == ["PlaceholderSync: chat on."], f"chat on confirms ({out})")
 out = slash("chat"); check(out == ["PlaceholderSync: chat off."], "bare chat toggles back")
 out = slash("autoscan off"); check(out and "autoscan off" in out[0], "autoscan off")
@@ -312,7 +315,7 @@ out = slash("scan"); check(out == ["PlaceholderSync: open the guild bank first."
 out = slash("sync"); check(out and out[0].startswith("PlaceholderSync: asked guild"), "sync asks the guild")
 out = slash("forget"); check(out == ["PlaceholderSync: shared copies dropped."], "forget")
 out = slash("debug"); check(out and "sync debug on" in out[0], "debug on"); slash("debug")
-out = slash("nonsense"); check(len(out) == 4, "unknown command shows help")
+out = slash("nonsense"); check(len(out) == 5, "unknown command shows help")
 out = slash("CHAT ON"); check(out == ["PlaceholderSync: chat on."], "commands are case-insensitive")
 slash("chat off")
 
@@ -332,7 +335,27 @@ check(gb is not None and len(list(gb.tabs.values())) == 3, "three tabs recorded,
 check(gb is not None and gb.log is not None and len(list(gb.log.tabs.values())) == 2 and len(list(gb.log.money.values())) == 1, "log: two tabs plus money")
 check(any("bank saved" in l for l in printed), f"chat on: bank saved line shown ({printed})")
 check(any(t.startswith(b"2H") for t, d in sent), "bank close announces the new scan")
+check(gb is not None and gb.realmId == 1403, f"bank scan carries the realm id from the GUID ({gb.realmId if gb is not None else None})")
+check(G.PlaceholderSyncDB.characters[b"Player-1403-0000ABCD"].realmId == 1403, "character record carries the realm id")
+check(not G.WOW.popups, "no reload prompt by default")
 slash("chat off")
+
+print("== reload prompt (opt-in) and the bridge's upload note")
+slash("prompt on"); lua('WOW.popups = {}')
+lua('FireEvent("GUILDBANKFRAME_OPENED")'); run(10); lua('FireEvent("GUILDBANKFRAME_CLOSED")'); run(1)
+check(list(G.WOW.popups.values()) == [b"PLACEHOLDERSYNC_RELOAD_AFTER_BANK"], f"prompt on: the reload question is shown once after the bank closes ({list(G.WOW.popups.values())})")
+check(G.StaticPopupDialogs[b"PLACEHOLDERSYNC_RELOAD_AFTER_BANK"].button1 == b"Reload" and G.WOW.reloaded is None, "the dialog offers Reload and nothing reloaded by itself")
+lua('WOW.combat = true; WOW.popups = {}'); lua('FireEvent("GUILDBANKFRAME_OPENED")'); run(10); lua('FireEvent("GUILDBANKFRAME_CLOSED")'); run(1); lua('WOW.combat = false')
+check(not list(G.WOW.popups.values()), "no prompt while in combat")
+slash("prompt off")
+gb = G.PlaceholderSyncDB.guildBank
+lua(f'PlaceholderSync_Upload = {{ at = {int(gb.at) + 120}, scanAt = {int(gb.at)}, status = "stored", gold = "1g", items = 3, tabs = 3, by = "Fluffys-Realm", characters = 1, appVersion = "0.4.9" }}')
+out = slash(""); check(any("reached the server" in l for l in out), f"status says the scan reached the server ({[l for l in out if 'server' in l]})")
+lua(f'PlaceholderSync_Upload.scanAt = {int(gb.at) - 3600}')
+out = slash(""); check(any("the server has the scan from" in l and "goes at your next /reload" in l for l in out), "status says an older scan is on the server and this one is pending")
+lua('PlaceholderSync_Upload = { at = 1762000000, status = "error", error = "the server rejected the token (401)" }')
+out = slash(""); check(any("rejected the token" in l for l in out), "status repeats the bridge's error")
+lua('PlaceholderSync_Upload = nil')
 out = slash(""); check(any("last scan" in l and "3 items in 3 tabs" in l for l in out), f"status reports the scan ({[l for l in out if 'scan' in l]})")
 check(any("last notice" in l for l in out), "status shows the last notice")
 
@@ -375,6 +398,7 @@ check(aw is not None and set(bytes(k).decode() for k in aw.keys()) == {"rclc:176
 check(aw is not None and aw[b"rclc:1762024500-1"].itemId == 250224 and bytes(aw[b"flc:77"].response) == b"Main spec", "award fields")
 out = slash(""); check(any("2 council awards recorded" in l for l in out), "status counts awards")
 
+NS_newer = lambda: G.NS.NewerVersion
 print("== a message from a guildmate")
 sent.clear()
 lua('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "2H9,0", "GUILD", "Other-Realm")'); run(5)
@@ -382,11 +406,19 @@ check(any(t == b"2RL3" for t, d in sent), f"a newer loot rev announced leads to 
 ok, err = pcall('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "2DL9:0:not-base64!!", "GUILD", "Other-Realm")')
 check(ok, "garbage data message is ignored without error")
 ok, err = pcall('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "1H1,1", "GUILD", "Other-Realm")'); check(ok, "old protocol ignored")
+printed.clear()
+lua('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "2V0.3.1", "GUILD", "Other-Realm")')
+check(not printed and NS_newer() is None, "an older guildmate version changes nothing")
+lua('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "2V0.9.9", "GUILD", "Other-Realm")')
+check(NS_newer() == b"0.9.9", f"a newer version seen is remembered ({NS_newer()})")
+out = slash(""); check(any("0.9.9 is out (you run 0.3.5)" in l for l in out), "status says a newer version is out")
+lua('ACECOMM.handlers.PlaceholderSync("PlaceholderSync", "2Vgarbage", "GUILD", "Other-Realm")')
+check(NS_newer() == b"0.9.9", "garbage version ignored")
 
 print("== logout")
 lua('FireEvent("PLAYER_LOGOUT")')
 db = G.PlaceholderSyncDB
-check(db.meta is not None and bytes(db.meta.addonVersion) == b"0.3.4", "meta stamped with the version")
+check(db.meta is not None and bytes(db.meta.addonVersion) == b"0.3.5", "meta stamped with the version")
 check(db.characters is not None and len(list(db.characters.keys())) == 1, "the character is recorded")
 check(bool(db.options.autoscan) is True and db.options.chat is False, f"options saved")
 check(all("Error" not in l and "error" not in l.lower() or "could not" in l for l in printed), "no error lines printed")
