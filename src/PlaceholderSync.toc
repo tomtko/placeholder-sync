@@ -16,5 +16,6 @@ LootData.lua
 Sync.lua
 LootLog.lua
 Character.lua
+Roster.lua
 Council_RCLC.lua
 Council_FLC.lua

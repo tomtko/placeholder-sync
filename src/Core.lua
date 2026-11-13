@@ -9,6 +9,7 @@
       meta       = { addonVersion, client, interface, flavor, savedAt },
       guildBank  = { guild, realm, by, at, money, complete, tabs = { { index, name, icon, items = { ... } } } },
       characters = { [guid] = { name, realm, class, level, gear, professions, talents, ... } }, -- Character.lua
+      roster     = { at, by, guild, total, online, members = { { name, rank, level, class, zone, ... } } }, -- Roster.lua
       lootShared = { rev, generatedAt, receivedAt, from, payload },          -- loot sheet copy from another officer (Sync.lua)
       lootAwards = { [uid] = { src, id, at, to, itemId, name, response, ... } }, -- council awards for the sheet's Loot Log (LootLog.lua)
       _apiCheck  = { "GetGuildBankItemLink", ... },                          -- API names missing on this client
@@ -266,6 +267,7 @@ local function status()
     NS.Print("%d council award%s recorded for the Loot Log (%d this week).", n, n == 1 and "" or "s", week)
   end
   if NS.Character then NS.Print(NS.Character.Summary() .. ".") end
+  if NS.Roster then NS.Print(NS.Roster.Summary() .. ".") end
   local missing = NS.db and NS.db._apiCheck or {}
   if #missing > 0 then NS.Print("missing API on this client: %s", table.concat(missing, ", ")) end
   local last = notices[1]
@@ -374,6 +376,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
     end
     if NS.LootLog then pcall(NS.LootLog.Start) end
     if NS.Character then pcall(NS.Character.Start) end
+    if NS.Roster then pcall(NS.Roster.Start) end
     if #missing > 0 then
       NS.Notify("this client is missing %d API function(s): %s", #missing, table.concat(missing, ", "))
     end

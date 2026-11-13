@@ -73,9 +73,11 @@ LE_PARTY_CATEGORY_HOME = 1
 function InCombatLockdown() return WOW.combat end
 function Ambiguate(n) return (tostring(n):match("^([^-]+)")) end
 C_AddOns = { GetAddOnMetadata = function(a, k) if k == "Version" then return "0.3.5" end end, IsAddOnLoaded = function(a) return WOW.loaded[a] == true end }
-C_GuildInfo = { GuildRoster = function() end, IsGuildOfficer = function() return WOW.officer end }
+C_GuildInfo = { GuildRoster = function() C_Timer.After(0.5, function() FireEvent("GUILD_ROSTER_UPDATE") end) end, IsGuildOfficer = function() return WOW.officer end }
 function GetNumGuildMembers() return 40, 25 end
-function GetGuildRosterInfo(i) return "Member" .. i .. "-Realm", i <= 5 and "Officer" or "Raider" end
+-- name, rank, rankIndex, level, classDisplay, zone, note, officerNote, online, status, class, achPts, achRank, mobile, canSoR, rep, guid
+function GetGuildRosterInfo(i) return "Member" .. i .. "-Realm", i <= 5 and "Officer" or "Raider", i <= 5 and 1 or 3, 10 + i, "Warlock", "Elwynn Forest", i == 2 and "alt of Member1" or "", "OFFICER SECRET", i <= 25, 0, "WARLOCK", 0, 0, false, false, 4, "Player-1403-" .. string.format("%08X", i) end
+function GetGuildRosterLastOnline(i) if i <= 25 then return nil end return 0, 0, i - 25, 3 end
 C_ChatInfo = { SendAddonMessage = function() end, RegisterAddonMessagePrefix = function() end }
 Enum = { CompressionMethod = { Zlib = 1 }, CompressionLevel = { OptimizeForSize = 9 }, AddOnRestrictionType = { Chat = 1 },
          AddOnRestrictionState = { Inactive = 0 }, PlayerInteractionType = { GuildBanker = 10 } }
@@ -256,6 +258,16 @@ check(G.PlaceholderSyncDB is not None, "SavedVariables table created")
 check(not printed, f"nothing printed at login by default ({printed})")
 check(any(d == "GUILD" for _, d in sent), "announced on guild chat after login")
 check(any(t == b"2V0.3.5" and d == "GUILD" for t, d in sent), f"the addon version rides along with the first announcement ({[t for t, d in sent]})")
+
+print("== guild roster")
+ro = G.PlaceholderSyncDB.roster
+check(ro is not None and len(list(ro.members.keys())) == 40, f"the whole guild roster is captured ({ro and len(list(ro.members.keys()))})")
+m1, m2, m30 = ro.members[1], ro.members[2], ro.members[30]
+check(bytes(m1.name) == b"Member1-Realm" and m1.level == 11 and bytes(m1[b"class"]) == b"WARLOCK" and m1.rankIndex == 1 and m1.online is True and m1.lastOnline is None, "a member carries name, level, class, rank and online state")
+check(bytes(m2.note) == b"alt of Member1" and m1.note is None, "the public note is kept, an empty one dropped")
+check(m30.online is False and m30.lastOnline == 5 * 24 + 3, f"an offline member gets the hours since last online ({m30.lastOnline})")
+check("OFFICER SECRET" not in str(list((k, v) for k, v in ro.members[1].items())), "officer notes are never read")
+check(ro.total == 40 and ro.online == 25 and ro.complete is True and bytes(ro.guild) == bytes(G.WOW.guild), "roster totals and guild")
 
 print("== character capture")
 db0 = G.PlaceholderSyncDB

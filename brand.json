@@ -1,6 +1,6 @@
 {
   "addon": "PlaceholderSync",
-  "addonVersion": "0.3.5",
+  "addonVersion": "0.3.6",
   "slash": "psync",
   "guild": "Placeholder",
   "serverUrl": "https://sync.placeholder-guild.com",
