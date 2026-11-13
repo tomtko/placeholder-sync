@@ -76,7 +76,8 @@ C_AddOns = { GetAddOnMetadata = function(a, k) if k == "Version" then return "0.
 C_GuildInfo = { GuildRoster = function() C_Timer.After(0.5, function() FireEvent("GUILD_ROSTER_UPDATE") end) end, IsGuildOfficer = function() return WOW.officer end }
 function GetNumGuildMembers() return 40, 25 end
 -- name, rank, rankIndex, level, classDisplay, zone, note, officerNote, online, status, class, achPts, achRank, mobile, canSoR, rep, guid
-function GetGuildRosterInfo(i) return "Member" .. i .. "-Realm", i <= 5 and "Officer" or "Raider", i <= 5 and 1 or 3, 10 + i, "Warlock", "Elwynn Forest", i == 2 and "alt of Member1" or "", "OFFICER SECRET", i <= 25, 0, "WARLOCK", 0, 0, false, false, 4, "Player-1403-" .. string.format("%08X", i) end
+WOW.rosterLevelBump = 0
+function GetGuildRosterInfo(i) if i == 3 then return "Member3-Realm", "Raider", 3, 13 + WOW.rosterLevelBump, "Warlock", "Elwynn Forest", "", "", true, 0, "WARLOCK", 0, 0, false, false, 4, "Player-1403-00000003" end return "Member" .. i .. "-Realm", i <= 5 and "Officer" or "Raider", i <= 5 and 1 or 3, 10 + i, "Warlock", "Elwynn Forest", i == 2 and "alt of Member1" or "", "OFFICER SECRET", i <= 25, 0, "WARLOCK", 0, 0, false, false, 4, "Player-1403-" .. string.format("%08X", i) end
 function GetGuildRosterLastOnline(i) if i <= 25 then return nil end return 0, 0, i - 25, 3 end
 C_ChatInfo = { SendAddonMessage = function() end, RegisterAddonMessagePrefix = function() end }
 Enum = { CompressionMethod = { Zlib = 1 }, CompressionLevel = { OptimizeForSize = 9 }, AddOnRestrictionType = { Chat = 1 },
@@ -268,6 +269,16 @@ check(bytes(m2.note) == b"alt of Member1" and m1.note is None, "the public note 
 check(m30.online is False and m30.lastOnline == 5 * 24 + 3, f"an offline member gets the hours since last online ({m30.lastOnline})")
 check("OFFICER SECRET" not in str(list((k, v) for k, v in ro.members[1].items())), "officer notes are never read")
 check(ro.total == 40 and ro.online == 25 and ro.complete is True and bytes(ro.guild) == bytes(G.WOW.guild), "roster totals and guild")
+check(G.PlaceholderSyncDB.rosterDings is None, "no level-ups logged from the first copy")
+lua('WOW.rosterLevelBump = 2; C_GuildInfo.GuildRoster()'); run(70)
+dl = G.PlaceholderSyncDB.rosterDings
+check(dl is not None and len(list(dl.keys())) == 1 and bytes(dl[1].name) == b"Member3-Realm" and dl[1][b"from"] == 13 and dl[1].to == 15 and dl[1].own is None, f"a level gained between two copies a minute apart is logged ({dl and [(bytes(d.name), d[b'from'], d.to) for d in dl.values()]})")
+lua('FireEvent("PLAYER_LEVEL_UP", 61)')
+dl = G.PlaceholderSyncDB.rosterDings
+own = [d for d in dl.values() if d.own]
+check(len(own) == 1 and own[0].to == 61 and own[0][b"from"] == 60, "your own level-up is logged to the second")
+lua('WOW.rosterLevelBump = 2; C_GuildInfo.GuildRoster()'); run(70)
+check(len(list(G.PlaceholderSyncDB.rosterDings.keys())) == 2, "an unchanged copy logs nothing new")
 
 print("== character capture")
 db0 = G.PlaceholderSyncDB

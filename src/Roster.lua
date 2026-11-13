@@ -8,14 +8,37 @@
 
   name is "Name-Realm" as the roster gives it, class the file name ("WARLOCK"), lastOnline hours since the member was
   last on (nil while online). complete is false when the client listed fewer members than GetNumGuildMembers counts.
+
+  Level-ups, in <AddonName>DB.rosterDings = { { name, from, to, at, own } }: each copy is compared with the one before
+  it, and a level that went up since a copy at most LIVE_GAP seconds old is logged with this copy's time, so a ding
+  is timed to about a minute while anyone running the addon is online. Your own character's PLAYER_LEVEL_UP is logged
+  to the second (own = true). An older previous copy (the last session's) proves nothing about when: the backend
+  times those from the scan instead. Kept for 14 days.
 ]]
 local ADDON, NS = ...
 local Roster = {}
 NS.Roster = Roster
 
 local THROTTLE = 60
+local LIVE_GAP = 600
+local KEEP_DINGS = 14 * 86400
 local lastAt = 0
 local pending = false
+
+local function logDing(name, from, to, at, own)
+  local log = NS.db.rosterDings
+  if type(log) ~= "table" then log = {} NS.db.rosterDings = log end
+  for _, d in ipairs(log) do
+    if d.name == name and d.to == to then
+      if at < d.at then d.at, d.own = at, own or d.own end
+      return
+    end
+  end
+  log[#log + 1] = { name = name, from = from, to = to, at = at, own = own or nil }
+  local cutoff = at - KEEP_DINGS
+  for i = #log, 1, -1 do if (log[i].at or 0) < cutoff then table.remove(log, i) end end
+  while #log > 2000 do table.remove(log, 1) end
+end
 
 local function plain(v)
   if issecretvalue and issecretvalue(v) then return nil end
@@ -54,8 +77,17 @@ function Roster.Capture()
     end
   end
   if #members == 0 then return nil end
+  local now, prev = time(), NS.db.roster
+  if prev and prev.guild == guild and type(prev.members) == "table" and (prev.at or 0) >= now - LIVE_GAP then
+    local before = {}
+    for _, m in ipairs(prev.members) do if m.name and m.level then before[m.name] = m.level end end
+    for _, m in ipairs(members) do
+      local was = before[m.name]
+      if was and m.level and m.level > was then logDing(m.name, was, m.level, now) end
+    end
+  end
   NS.db.roster = {
-    at = time(), by = NS.PlayerKey and NS.PlayerKey() or nil, guild = guild, realmId = NS.RealmId and NS.RealmId() or nil,
+    at = now, by = NS.PlayerKey and NS.PlayerKey() or nil, guild = guild, realmId = NS.RealmId and NS.RealmId() or nil,
     total = total, online = online, complete = #members >= total, members = members,
   }
   lastAt = GetTime and GetTime() or 0
@@ -84,8 +116,13 @@ function Roster.Start()
   local f = CreateFrame("Frame")
   f:RegisterEvent("GUILD_ROSTER_UPDATE")
   f:RegisterEvent("PLAYER_LOGOUT")
-  f:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_LOGOUT" then pcall(Roster.Capture) else onRosterUpdate() end
+  f:RegisterEvent("PLAYER_LEVEL_UP")
+  f:SetScript("OnEvent", function(_, event, level)
+    if event == "PLAYER_LOGOUT" then pcall(Roster.Capture)
+    elseif event == "PLAYER_LEVEL_UP" then
+      local to = plain(level)
+      if type(to) == "number" and NS.db and IsInGuild and IsInGuild() then pcall(logDing, NS.PlayerKey(), to - 1, to, time(), true) end
+    else onRosterUpdate() end
   end)
   if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
 end
